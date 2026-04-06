@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle
@@ -68,66 +67,6 @@ const PLATFORMS = [
     ],
     docs: "https://www.urbanpiper.com/",
     webhookEvents: ["order.new", "order.cancelled", "menu.updated"],
-  },
-  {
-    id: "uber_eats",
-    name: "Uber Eats",
-    logo: "U",
-    color: "bg-green-600",
-    description: "Uber Eats Marketplace API integration. Manage stores, menus, and orders programmatically.",
-    features: ["Store management", "Menu CRUD", "Order lifecycle", "Webhook notifications"],
-    fields: [
-      { key: "store_id", label: "Store ID", placeholder: "Uber Eats Store UUID", type: "text" },
-      { key: "client_id", label: "Client ID", placeholder: "OAuth Client ID", type: "text" },
-      { key: "client_secret", label: "Client Secret", placeholder: "OAuth Client Secret", type: "password" },
-    ],
-    docs: "https://developer.uber.com/docs/eats/introduction",
-    webhookEvents: ["orders.notification", "orders.cancel"],
-  },
-  {
-    id: "razorpay",
-    name: "Razorpay",
-    logo: "R",
-    color: "bg-blue-600",
-    description: "Accept payments via cards, UPI, netbanking, and 100+ wallets. PCI-DSS compliant.",
-    features: ["Card payments", "UPI / Bharat QR", "Netbanking", "Wallets", "Split payments", "Refunds"],
-    fields: [
-      { key: "key_id", label: "Key ID", placeholder: "rzp_live_xxxxxxxxxx", type: "text" },
-      { key: "key_secret", label: "Key Secret", placeholder: "Razorpay Key Secret", type: "password" },
-      { key: "webhook_secret", label: "Webhook Secret", placeholder: "Webhook signing secret", type: "password" },
-    ],
-    docs: "https://razorpay.com/docs/",
-    webhookEvents: ["payment.captured", "payment.failed", "refund.processed"],
-  },
-  {
-    id: "msg91",
-    name: "MSG91 (SMS)",
-    logo: "M",
-    color: "bg-purple-600",
-    description: "Send transactional SMS — order confirmations, OTPs, booking reminders, and marketing.",
-    features: ["Order SMS", "OTP verification", "Booking reminders", "Promotional campaigns"],
-    fields: [
-      { key: "auth_key", label: "Auth Key", placeholder: "MSG91 Auth Key", type: "password" },
-      { key: "sender_id", label: "Sender ID", placeholder: "6-char sender ID (e.g., RESTPO)", type: "text" },
-      { key: "template_id", label: "Template ID", placeholder: "DLT Template ID", type: "text" },
-    ],
-    docs: "https://msg91.com/help/",
-    webhookEvents: [],
-  },
-  {
-    id: "sendgrid",
-    name: "SendGrid (Email)",
-    logo: "E",
-    color: "bg-indigo-600",
-    description: "Send digital receipts, invoices, and promotional emails to customers.",
-    features: ["Digital receipts", "Invoice emails", "Marketing campaigns", "Transactional emails"],
-    fields: [
-      { key: "api_key", label: "API Key", placeholder: "SG.xxxxxxxxxxxxxxxx", type: "password" },
-      { key: "from_email", label: "From Email", placeholder: "orders@yourrestaurant.com", type: "text" },
-      { key: "from_name", label: "From Name", placeholder: "Your Restaurant Name", type: "text" },
-    ],
-    docs: "https://docs.sendgrid.com/",
-    webhookEvents: [],
   },
 ];
 
@@ -245,27 +184,9 @@ export default function IntegrationsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="all">
-        <TabsList>
-          <TabsTrigger value="all">All Platforms</TabsTrigger>
-          <TabsTrigger value="delivery">Food Delivery</TabsTrigger>
-          <TabsTrigger value="payments">Payments</TabsTrigger>
-          <TabsTrigger value="comms">SMS & Email</TabsTrigger>
-        </TabsList>
-
-        {["all", "delivery", "payments", "comms"].map((tab) => {
-          const filtered = PLATFORMS.filter((p) => {
-            if (tab === "all") return true;
-            if (tab === "delivery") return ["zomato", "swiggy", "uber_eats"].includes(p.id);
-            if (tab === "payments") return p.id === "razorpay";
-            if (tab === "comms") return ["msg91", "sendgrid"].includes(p.id);
-            return true;
-          });
-
-          return (
-            <TabsContent key={tab} value={tab}>
+      <div>
               <div className="grid gap-4 lg:grid-cols-2">
-                {filtered.map((platform) => {
+                {PLATFORMS.map((platform) => {
                   const integration = getIntegration(platform.id);
                   const isConnected = !!integration;
 
@@ -362,10 +283,7 @@ export default function IntegrationsPage() {
                   );
                 })}
               </div>
-            </TabsContent>
-          );
-        })}
-      </Tabs>
+      </div>
 
       {/* Connect Dialog */}
       {connectDialog && (() => {
