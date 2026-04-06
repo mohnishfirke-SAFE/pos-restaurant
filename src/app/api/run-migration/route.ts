@@ -11,7 +11,8 @@ export async function POST(request: Request) {
   }
 
   const projectRef = "sioshhykphwbuymzvikl";
-  const dbPassword = process.env.SUPABASE_DB_PASSWORD || body.db_password || "postgres";
+  const rawPassword = process.env.SUPABASE_DB_PASSWORD || body.db_password || "postgres";
+  const dbPassword = encodeURIComponent(rawPassword);
 
   // Try all Supabase regions for the pooler
   const regions = [
