@@ -4,25 +4,57 @@ import { Client } from "pg";
 // TEMPORARY — runs migration 00015 via direct DB connection from Vercel
 // Will be deleted after migration completes
 export async function POST(request: Request) {
-  const { secret } = await request.json();
+  const body = await request.json();
+  const { secret } = body;
   if (secret !== "migrate-00015-zomato-swiggy") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const projectRef = "sioshhykphwbuymzvikl";
-  const dbUrl = `postgresql://postgres.${projectRef}:${process.env.SUPABASE_DB_PASSWORD || "postgres"}@aws-0-ap-south-1.pooler.supabase.com:6543/postgres`;
+  const dbPassword = process.env.SUPABASE_DB_PASSWORD || body.db_password || "postgres";
 
-  const client = new Client({
-    connectionString: dbUrl,
-    ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 15000,
-  });
+  // Connection strategies to try in order
+  const connectionStrings = [
+    // Direct connection (Vercel can reach this)
+    `postgresql://postgres:${dbPassword}@db.${projectRef}.supabase.co:5432/postgres`,
+    // Session pooler
+    `postgresql://postgres.${projectRef}:${dbPassword}@aws-0-ap-south-1.pooler.supabase.com:5432/postgres`,
+    // Transaction pooler
+    `postgresql://postgres.${projectRef}:${dbPassword}@aws-0-ap-south-1.pooler.supabase.com:6543/postgres`,
+  ];
 
   const results: Array<{ step: string; status: string; error?: string }> = [];
+  let client: Client | null = null;
+  let connError = "";
+
+  for (const connStr of connectionStrings) {
+    try {
+      const c = new Client({
+        connectionString: connStr,
+        ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 10000,
+      });
+      await c.connect();
+      client = c;
+      results.push({ step: "connect", status: "success", error: connStr.replace(dbPassword, "***") });
+      break;
+    } catch (err) {
+      connError = err instanceof Error ? err.message : String(err);
+      results.push({ step: "connect_attempt", status: "failed", error: connError });
+    }
+  }
+
+  if (!client) {
+    return NextResponse.json({
+      success: false,
+      total: results.length,
+      failed: results.length,
+      results,
+      hint: "Provide db_password in request body",
+    });
+  }
 
   try {
-    await client.connect();
-    results.push({ step: "connect", status: "success" });
 
     // Run migration statements one by one
     const statements: Array<{ name: string; sql: string }> = [
