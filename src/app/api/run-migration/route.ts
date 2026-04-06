@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import pg from "pg";
+import { Client } from "pg";
 
 // TEMPORARY — runs migration 00015 via direct DB connection from Vercel
 // Will be deleted after migration completes
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   const projectRef = "sioshhykphwbuymzvikl";
   const dbUrl = `postgresql://postgres.${projectRef}:${process.env.SUPABASE_DB_PASSWORD || "postgres"}@aws-0-ap-south-1.pooler.supabase.com:6543/postgres`;
 
-  const client = new pg.Client({
+  const client = new Client({
     connectionString: dbUrl,
     ssl: { rejectUnauthorized: false },
     connectionTimeoutMillis: 15000,
