@@ -13,15 +13,33 @@ export async function POST(request: Request) {
   const projectRef = "sioshhykphwbuymzvikl";
   const dbPassword = process.env.SUPABASE_DB_PASSWORD || body.db_password || "postgres";
 
-  // Connection strategies to try in order
-  const connectionStrings = [
-    // Direct connection (Vercel can reach this)
-    `postgresql://postgres:${dbPassword}@db.${projectRef}.supabase.co:5432/postgres`,
-    // Session pooler
-    `postgresql://postgres.${projectRef}:${dbPassword}@aws-0-ap-south-1.pooler.supabase.com:5432/postgres`,
-    // Transaction pooler
-    `postgresql://postgres.${projectRef}:${dbPassword}@aws-0-ap-south-1.pooler.supabase.com:6543/postgres`,
+  // Try all Supabase regions for the pooler
+  const regions = [
+    "aws-0-ap-south-1",
+    "aws-0-us-east-1",
+    "aws-0-us-west-1",
+    "aws-0-eu-west-1",
+    "aws-0-eu-central-1",
+    "aws-0-ap-southeast-1",
+    "aws-0-ap-northeast-1",
   ];
+
+  const connectionStrings: string[] = [];
+
+  // Direct connection first
+  connectionStrings.push(
+    `postgresql://postgres:${dbPassword}@db.${projectRef}.supabase.co:5432/postgres`
+  );
+
+  // Try all regions with session mode (5432) and transaction mode (6543)
+  for (const region of regions) {
+    connectionStrings.push(
+      `postgresql://postgres.${projectRef}:${dbPassword}@${region}.pooler.supabase.com:5432/postgres`
+    );
+    connectionStrings.push(
+      `postgresql://postgres.${projectRef}:${dbPassword}@${region}.pooler.supabase.com:6543/postgres`
+    );
+  }
 
   const results: Array<{ step: string; status: string; error?: string }> = [];
   let client: Client | null = null;
