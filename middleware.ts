@@ -13,7 +13,8 @@ export async function middleware(request: NextRequest) {
     publicRoutes.includes(pathname) ||
     kioskRoutes.test(pathname) ||
     pathname.startsWith("/api/webhooks") ||
-    pathname.startsWith("/api/kiosk")
+    pathname.startsWith("/api/kiosk") ||
+    pathname.startsWith("/api/run-migration")
   ) {
     return NextResponse.next();
   }
