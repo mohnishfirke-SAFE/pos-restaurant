@@ -67,50 +67,23 @@ export default function RegisterPage() {
     }
 
     if (authData.user) {
-      // Create tenant and tenant_user via a server action or API route
-      const slug = formData.restaurantName
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/(^-|-$)/g, "");
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const db = supabase as any;
-
-      const { data: tenant, error: tenantError } = await db
-        .from("tenants")
-        .insert({
-          name: formData.restaurantName,
-          slug: slug + "-" + Date.now().toString(36),
+      // Use server API route with service role to bypass RLS
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          restaurantName: formData.restaurantName,
           email: formData.email,
-        })
-        .select()
-        .single();
+          userId: authData.user.id,
+        }),
+      });
 
-      if (tenantError || !tenant) {
-        setError("Account created but failed to set up restaurant. Please contact support.");
+      if (!res.ok) {
+        const err = await res.json();
+        setError(err.error || "Failed to set up restaurant. Please contact support.");
         setLoading(false);
         return;
       }
-
-      // Create default branch
-      const { data: branch } = await db
-        .from("branches")
-        .insert({
-          tenant_id: tenant.id,
-          name: "Main Branch",
-          code: "MAIN",
-        })
-        .select()
-        .single();
-
-      // Link user to tenant as owner
-      await db.from("tenant_users").insert({
-        user_id: authData.user.id,
-        tenant_id: tenant.id,
-        branch_id: branch?.id ?? null,
-        role: "tenant_owner",
-        display_name: formData.restaurantName,
-      });
 
       router.push("/dashboard");
       router.refresh();
