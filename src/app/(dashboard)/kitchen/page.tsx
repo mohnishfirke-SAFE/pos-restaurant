@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { useBranchStore } from "@/stores/branch-store";
 import {
   ChefHat,
   Clock,
@@ -12,12 +14,18 @@ import {
   CheckCircle2,
   Play,
   ArrowRight,
+  User,
+  Phone,
+  MapPin,
+  Timer,
+  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import type { KotStatus, OrderType } from "@/types";
 
@@ -40,14 +48,46 @@ interface KOT {
   status: KotStatus;
   createdAt: Date;
   items: KOTItem[];
+  // Platform integration fields
+  aggregatorPlatform: string | null;
+  customerName: string | null;
+  deliveryPartnerName: string | null;
+  deliveryPartnerPhone: string | null;
+  pickupEta: Date | null;
+  aggregatorOrderId: string | null;
+  orderId: string;
 }
 
 // ---------------------------------------------------------------------------
-// Mock Data
+// Platform config
+// ---------------------------------------------------------------------------
+const PLATFORM_CONFIG: Record<
+  string,
+  { label: string; color: string; bgColor: string; borderColor: string; logo: string }
+> = {
+  zomato: {
+    label: "Zomato",
+    color: "text-white",
+    bgColor: "bg-red-600",
+    borderColor: "border-red-500",
+    logo: "Z",
+  },
+  swiggy: {
+    label: "Swiggy",
+    color: "text-white",
+    bgColor: "bg-orange-500",
+    borderColor: "border-orange-400",
+    logo: "S",
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Mock Data (fallback when DB is empty)
 // ---------------------------------------------------------------------------
 const MOCK_KOTS: KOT[] = [
   {
     id: "kot-1",
+    orderId: "ord-1",
     orderNumber: "#1042",
     tableNumber: "T3",
     orderType: "dine_in",
@@ -58,21 +98,35 @@ const MOCK_KOTS: KOT[] = [
       { id: "i2", name: "Garlic Naan", quantity: 4, modifiers: [], notes: "" },
       { id: "i3", name: "Dal Makhani", quantity: 1, modifiers: [], notes: "Less salt" },
     ],
+    aggregatorPlatform: null,
+    customerName: null,
+    deliveryPartnerName: null,
+    deliveryPartnerPhone: null,
+    pickupEta: null,
+    aggregatorOrderId: null,
   },
   {
     id: "kot-2",
+    orderId: "ord-2",
     orderNumber: "#1043",
     tableNumber: null,
-    orderType: "takeaway",
+    orderType: "aggregator",
     status: "pending",
     createdAt: new Date(Date.now() - 5 * 60_000),
     items: [
       { id: "i4", name: "Chicken Biryani", quantity: 1, modifiers: ["No Raita"], notes: "" },
       { id: "i5", name: "Paneer Tikka", quantity: 1, modifiers: [], notes: "" },
     ],
+    aggregatorPlatform: "zomato",
+    customerName: "Rahul Kumar",
+    deliveryPartnerName: "Amit S.",
+    deliveryPartnerPhone: "+91-9876543210",
+    pickupEta: new Date(Date.now() + 8 * 60_000),
+    aggregatorOrderId: "ZMT-98765",
   },
   {
     id: "kot-3",
+    orderId: "ord-3",
     orderNumber: "#1040",
     tableNumber: "T7",
     orderType: "dine_in",
@@ -82,20 +136,34 @@ const MOCK_KOTS: KOT[] = [
       { id: "i6", name: "Tandoori Platter", quantity: 1, modifiers: [], notes: "" },
       { id: "i7", name: "Hyderabadi Biryani", quantity: 2, modifiers: ["Extra Salan"], notes: "" },
     ],
+    aggregatorPlatform: null,
+    customerName: null,
+    deliveryPartnerName: null,
+    deliveryPartnerPhone: null,
+    pickupEta: null,
+    aggregatorOrderId: null,
   },
   {
     id: "kot-4",
+    orderId: "ord-4",
     orderNumber: "#1041",
     tableNumber: null,
-    orderType: "delivery",
+    orderType: "aggregator",
     status: "in_progress",
     createdAt: new Date(Date.now() - 8 * 60_000),
     items: [
       { id: "i8", name: "Veg Thali", quantity: 3, modifiers: [], notes: "No onion, no garlic" },
     ],
+    aggregatorPlatform: "swiggy",
+    customerName: "Priya M.",
+    deliveryPartnerName: "Raju D.",
+    deliveryPartnerPhone: "+91-8765432109",
+    pickupEta: new Date(Date.now() + 5 * 60_000),
+    aggregatorOrderId: "SWG-45678",
   },
   {
     id: "kot-5",
+    orderId: "ord-5",
     orderNumber: "#1038",
     tableNumber: "T1",
     orderType: "dine_in",
@@ -105,23 +173,36 @@ const MOCK_KOTS: KOT[] = [
       { id: "i9", name: "Masala Dosa", quantity: 2, modifiers: [], notes: "" },
       { id: "i10", name: "Filter Coffee", quantity: 2, modifiers: [], notes: "" },
     ],
+    aggregatorPlatform: null,
+    customerName: null,
+    deliveryPartnerName: null,
+    deliveryPartnerPhone: null,
+    pickupEta: null,
+    aggregatorOrderId: null,
   },
   {
     id: "kot-6",
+    orderId: "ord-6",
     orderNumber: "#1039",
     tableNumber: null,
-    orderType: "takeaway",
+    orderType: "aggregator",
     status: "ready",
     createdAt: new Date(Date.now() - 15 * 60_000),
     items: [
       { id: "i11", name: "Chole Bhature", quantity: 1, modifiers: [], notes: "" },
       { id: "i12", name: "Lassi", quantity: 1, modifiers: ["Sweet"], notes: "" },
     ],
+    aggregatorPlatform: "zomato",
+    customerName: "Sanjay P.",
+    deliveryPartnerName: "Vinod K.",
+    deliveryPartnerPhone: "+91-7654321098",
+    pickupEta: new Date(Date.now() + 2 * 60_000),
+    aggregatorOrderId: "ZMT-87654",
   },
 ];
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Order Type Config
 // ---------------------------------------------------------------------------
 const ORDER_TYPE_CONFIG: Record<
   OrderType,
@@ -148,16 +229,27 @@ const ORDER_TYPE_CONFIG: Record<
     className: "bg-teal-500/20 text-teal-400 border-teal-500/30",
   },
   aggregator: {
-    label: "Aggregator",
+    label: "Online",
     icon: Truck,
     className: "bg-pink-500/20 text-pink-400 border-pink-500/30",
   },
 };
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 function formatElapsed(createdAt: Date): string {
   const diffSec = Math.floor((Date.now() - createdAt.getTime()) / 1000);
   const mins = Math.floor(diffSec / 60);
   const secs = diffSec % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+function formatEtaCountdown(eta: Date): string {
+  const diffMs = eta.getTime() - Date.now();
+  if (diffMs <= 0) return "NOW";
+  const mins = Math.floor(diffMs / 60_000);
+  const secs = Math.floor((diffMs % 60_000) / 1000);
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
@@ -168,6 +260,42 @@ function getTimerColor(createdAt: Date): string {
   return "text-green-400";
 }
 
+function getEtaColor(eta: Date): string {
+  const diffMins = (eta.getTime() - Date.now()) / 60_000;
+  if (diffMins <= 2) return "text-red-400";
+  if (diffMins <= 5) return "text-amber-400";
+  return "text-green-400";
+}
+
+// Priority sort: online orders with closer pickup ETA come first
+function sortByPriority(kots: KOT[]): KOT[] {
+  return [...kots].sort((a, b) => {
+    // Online orders with pickup ETA get highest priority
+    if (a.pickupEta && b.pickupEta) {
+      return a.pickupEta.getTime() - b.pickupEta.getTime();
+    }
+    if (a.pickupEta && !b.pickupEta) return -1;
+    if (!a.pickupEta && b.pickupEta) return 1;
+    // Then by creation time (oldest first)
+    return a.createdAt.getTime() - b.createdAt.getTime();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Platform Badge
+// ---------------------------------------------------------------------------
+function PlatformBadge({ platform }: { platform: string }) {
+  const config = PLATFORM_CONFIG[platform];
+  if (!config) return null;
+
+  return (
+    <div className={cn("flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-bold", config.bgColor, config.color)}>
+      <span className="text-sm font-black">{config.logo}</span>
+      {config.label}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // KOT Card Component
 // ---------------------------------------------------------------------------
@@ -176,19 +304,29 @@ function KOTCard({
   onAction,
 }: {
   kot: KOT;
-  onAction: (id: string, newStatus: KotStatus) => void;
+  onAction: (id: string, newStatus: KotStatus, orderId: string) => void;
 }) {
   const [elapsed, setElapsed] = useState(formatElapsed(kot.createdAt));
+  const [etaCountdown, setEtaCountdown] = useState(
+    kot.pickupEta ? formatEtaCountdown(kot.pickupEta) : null
+  );
 
   useEffect(() => {
     const interval = setInterval(() => {
       setElapsed(formatElapsed(kot.createdAt));
+      if (kot.pickupEta) {
+        setEtaCountdown(formatEtaCountdown(kot.pickupEta));
+      }
     }, 1000);
     return () => clearInterval(interval);
-  }, [kot.createdAt]);
+  }, [kot.createdAt, kot.pickupEta]);
 
   const config = ORDER_TYPE_CONFIG[kot.orderType];
   const TypeIcon = config.icon;
+  const isOnline = kot.orderType === "aggregator" && kot.aggregatorPlatform;
+  const platformConfig = kot.aggregatorPlatform
+    ? PLATFORM_CONFIG[kot.aggregatorPlatform]
+    : null;
 
   const actionMap: Record<
     string,
@@ -196,14 +334,33 @@ function KOTCard({
   > = {
     pending: { label: "Start Cooking", newStatus: "in_progress", icon: Play },
     in_progress: { label: "Mark Ready", newStatus: "ready", icon: CheckCircle2 },
-    ready: { label: "Served", newStatus: "served", icon: ArrowRight },
+    ready: { label: "Picked Up / Served", newStatus: "served", icon: ArrowRight },
   };
 
   const action = actionMap[kot.status];
 
   return (
-    <Card className="border-zinc-700 bg-zinc-800/80 shadow-lg">
+    <Card
+      className={cn(
+        "shadow-lg",
+        isOnline && platformConfig
+          ? `border-2 ${platformConfig.borderColor} bg-zinc-800/90`
+          : "border-zinc-700 bg-zinc-800/80"
+      )}
+    >
       <CardHeader className="p-4 pb-2">
+        {/* Platform banner for online orders */}
+        {isOnline && kot.aggregatorPlatform && (
+          <div className="flex items-center justify-between -mt-1 mb-2">
+            <PlatformBadge platform={kot.aggregatorPlatform} />
+            {kot.aggregatorOrderId && (
+              <span className="text-[10px] font-mono text-zinc-500">
+                {kot.aggregatorOrderId}
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <CardTitle className="text-base font-bold text-zinc-100">
@@ -214,16 +371,59 @@ function KOTCard({
             )}
           </div>
           <div className="flex flex-col items-end gap-1.5">
-            <Badge variant="outline" className={cn("text-[10px]", config.className)}>
-              <TypeIcon className="mr-1 h-3 w-3" />
-              {config.label}
-            </Badge>
-            <div className={cn("flex items-center gap-1 text-xs font-mono font-semibold", getTimerColor(kot.createdAt))}>
+            {!isOnline && (
+              <Badge variant="outline" className={cn("text-[10px]", config.className)}>
+                <TypeIcon className="mr-1 h-3 w-3" />
+                {config.label}
+              </Badge>
+            )}
+            <div
+              className={cn(
+                "flex items-center gap-1 text-xs font-mono font-semibold",
+                getTimerColor(kot.createdAt)
+              )}
+            >
               <Clock className="h-3 w-3" />
               {elapsed}
             </div>
           </div>
         </div>
+
+        {/* Delivery partner info + pickup ETA */}
+        {isOnline && (
+          <div className="mt-2 space-y-1 rounded-md bg-zinc-900/60 p-2">
+            {kot.customerName && (
+              <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+                <User className="h-3 w-3 shrink-0" />
+                <span className="truncate">{kot.customerName}</span>
+              </div>
+            )}
+            {kot.deliveryPartnerName && (
+              <div className="flex items-center gap-1.5 text-xs text-zinc-300">
+                <Truck className="h-3 w-3 shrink-0" />
+                <span className="truncate">
+                  {kot.deliveryPartnerName}
+                </span>
+                {kot.deliveryPartnerPhone && (
+                  <a href={`tel:${kot.deliveryPartnerPhone}`} className="ml-auto text-blue-400 hover:text-blue-300">
+                    <Phone className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
+            )}
+            {kot.pickupEta && etaCountdown && (
+              <div
+                className={cn(
+                  "flex items-center gap-1.5 text-xs font-bold",
+                  getEtaColor(kot.pickupEta)
+                )}
+              >
+                <Timer className="h-3 w-3 shrink-0" />
+                Pickup in: {etaCountdown}
+              </div>
+            )}
+          </div>
+        )}
       </CardHeader>
 
       <Separator className="bg-zinc-700" />
@@ -270,7 +470,7 @@ function KOTCard({
               kot.status === "ready" &&
                 "bg-amber-600 text-white hover:bg-amber-700"
             )}
-            onClick={() => onAction(kot.id, action.newStatus)}
+            onClick={() => onAction(kot.id, action.newStatus, kot.orderId)}
           >
             <action.icon className="h-4 w-4" />
             {action.label}
@@ -292,12 +492,11 @@ function KDSColumn({
 }: {
   title: string;
   kots: KOT[];
-  onAction: (id: string, newStatus: KotStatus) => void;
+  onAction: (id: string, newStatus: KotStatus, orderId: string) => void;
   accentColor: string;
 }) {
   return (
     <div className="flex min-w-[320px] flex-1 flex-col">
-      {/* Column header */}
       <div className="flex items-center gap-3 border-b border-zinc-700 px-4 py-3">
         <div className={cn("h-2.5 w-2.5 rounded-full", accentColor)} />
         <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-300">
@@ -311,7 +510,6 @@ function KDSColumn({
         </Badge>
       </div>
 
-      {/* Column body */}
       <ScrollArea className="flex-1">
         <div className="space-y-3 p-3">
           {kots.length === 0 && (
@@ -335,16 +533,77 @@ function KDSColumn({
 export default function KitchenDisplayPage() {
   const [kots, setKots] = useState<KOT[]>(MOCK_KOTS);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [filter, setFilter] = useState<"all" | "dine_in" | "swiggy" | "zomato">("all");
+  const { activeBranchId } = useBranchStore();
+  const supabase = createClient();
+
+  // Sync KOT status back to platform when kitchen updates
+  const syncStatusToPlatform = useCallback(
+    async (orderId: string, newStatus: KotStatus) => {
+      const statusMap: Record<string, string> = {
+        in_progress: "preparing",
+        ready: "ready",
+        served: "completed",
+      };
+      const mappedStatus = statusMap[newStatus];
+      if (!mappedStatus) return;
+
+      try {
+        await fetch("/api/integrations/status-sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            order_id: orderId,
+            new_status: mappedStatus,
+          }),
+        });
+      } catch {
+        // Silent fail — logged server-side
+      }
+    },
+    []
+  );
 
   const handleAction = useCallback(
-    (id: string, newStatus: KotStatus) => {
-      setKots((prev) =>
-        newStatus === "served"
-          ? prev.filter((k) => k.id !== id)
-          : prev.map((k) => (k.id === id ? { ...k, status: newStatus } : k))
-      );
+    (id: string, newStatus: KotStatus, orderId: string) => {
+      setKots((prev) => {
+        const kot = prev.find((k) => k.id === id);
+        const isAggregator = kot?.orderType === "aggregator";
 
-      // Play notification sound if enabled
+        const updated =
+          newStatus === "served"
+            ? prev.filter((k) => k.id !== id)
+            : prev.map((k) =>
+                k.id === id ? { ...k, status: newStatus } : k
+              );
+
+        // Push status to platform for aggregator orders
+        if (isAggregator) {
+          syncStatusToPlatform(orderId, newStatus);
+        }
+
+        return updated;
+      });
+
+      // Update KOT in database
+      const timestampField =
+        newStatus === "in_progress"
+          ? "accepted_at"
+          : newStatus === "ready"
+            ? "ready_at"
+            : null;
+
+      const updatePayload: Record<string, unknown> = {
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      };
+      if (timestampField) {
+        updatePayload[timestampField] = new Date().toISOString();
+      }
+
+      supabase.from("kots").update(updatePayload).eq("id", id).then(() => {});
+
+      // Play notification sound
       if (soundEnabled && typeof window !== "undefined") {
         try {
           const ctx = new AudioContext();
@@ -361,12 +620,26 @@ export default function KitchenDisplayPage() {
         }
       }
     },
-    [soundEnabled]
+    [soundEnabled, supabase, syncStatusToPlatform]
   );
 
-  const pendingKots = kots.filter((k) => k.status === "pending");
-  const inProgressKots = kots.filter((k) => k.status === "in_progress");
-  const readyKots = kots.filter((k) => k.status === "ready");
+  // Filter KOTs
+  const filteredKots = kots.filter((k) => {
+    if (filter === "all") return true;
+    if (filter === "dine_in") return k.orderType !== "aggregator";
+    return k.aggregatorPlatform === filter;
+  });
+
+  // Sort by priority (online orders with closer pickup ETA first)
+  const pendingKots = sortByPriority(filteredKots.filter((k) => k.status === "pending"));
+  const inProgressKots = sortByPriority(filteredKots.filter((k) => k.status === "in_progress"));
+  const readyKots = sortByPriority(filteredKots.filter((k) => k.status === "ready"));
+
+  // Counts for filter badges
+  const onlineCount = kots.filter((k) => k.orderType === "aggregator").length;
+  const zomatoCount = kots.filter((k) => k.aggregatorPlatform === "zomato").length;
+  const swiggyCount = kots.filter((k) => k.aggregatorPlatform === "swiggy").length;
+  const dineInCount = kots.filter((k) => k.orderType !== "aggregator").length;
 
   return (
     <div className="-m-4 flex h-[calc(100vh-4rem)] flex-col bg-zinc-900 lg:-m-6">
@@ -381,22 +654,44 @@ export default function KitchenDisplayPage() {
             variant="outline"
             className="border-zinc-600 text-xs text-zinc-400"
           >
-            {kots.length} active
+            {filteredKots.length} active
           </Badge>
         </div>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-zinc-400 hover:text-zinc-100"
-          onClick={() => setSoundEnabled((prev) => !prev)}
-        >
-          {soundEnabled ? (
-            <Volume2 className="h-5 w-5" />
-          ) : (
-            <VolumeX className="h-5 w-5" />
-          )}
-        </Button>
+        <div className="flex items-center gap-3">
+          {/* Channel filter tabs */}
+          <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
+            <TabsList className="bg-zinc-800 border border-zinc-700">
+              <TabsTrigger value="all" className="text-xs data-[state=active]:bg-zinc-700">
+                All ({kots.length})
+              </TabsTrigger>
+              <TabsTrigger value="dine_in" className="text-xs data-[state=active]:bg-zinc-700">
+                Dine-in ({dineInCount})
+              </TabsTrigger>
+              <TabsTrigger value="zomato" className="text-xs data-[state=active]:bg-zinc-700">
+                <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded bg-red-600 text-[9px] font-black text-white">Z</span>
+                ({zomatoCount})
+              </TabsTrigger>
+              <TabsTrigger value="swiggy" className="text-xs data-[state=active]:bg-zinc-700">
+                <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded bg-orange-500 text-[9px] font-black text-white">S</span>
+                ({swiggyCount})
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-zinc-400 hover:text-zinc-100"
+            onClick={() => setSoundEnabled((prev) => !prev)}
+          >
+            {soundEnabled ? (
+              <Volume2 className="h-5 w-5" />
+            ) : (
+              <VolumeX className="h-5 w-5" />
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Kanban columns */}

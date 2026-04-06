@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatINR } from "@/lib/utils/currency";
-import { BarChart3, TrendingUp, TrendingDown, Download, IndianRupee, ShoppingCart, Users, Clock } from "lucide-react";
+import { BarChart3, TrendingUp, TrendingDown, Download, IndianRupee, ShoppingCart, Users, Clock, Truck } from "lucide-react";
 
 const mockStats = {
   revenue: 125750,
@@ -149,6 +149,51 @@ export default function ReportsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Channel Breakdown Widget */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Truck className="h-4 w-4" />
+            Channel Breakdown
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              { name: "Dine-in", orders: 52, revenue: 73500, color: "bg-blue-500" },
+              { name: "Zomato", orders: 18, revenue: 27000, color: "bg-red-600", logo: "Z", commission: 6750 },
+              { name: "Swiggy", orders: 12, revenue: 16800, color: "bg-orange-500", logo: "S", commission: 3360 },
+              { name: "Takeaway", orders: 7, revenue: 8450, color: "bg-purple-500" },
+            ].map((ch) => (
+              <div key={ch.name} className="rounded-lg border p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  {"logo" in ch && ch.logo ? (
+                    <span className={`inline-flex h-6 w-6 items-center justify-center rounded text-xs font-black text-white ${ch.color}`}>
+                      {ch.logo}
+                    </span>
+                  ) : (
+                    <div className={`h-3 w-3 rounded-full ${ch.color}`} />
+                  )}
+                  <span className="text-sm font-medium">{ch.name}</span>
+                </div>
+                <div className="text-xl font-bold">{formatINR(ch.revenue)}</div>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{ch.orders} orders</span>
+                  {"commission" in ch && ch.commission ? (
+                    <span className="text-red-500">-{formatINR(ch.commission)} comm.</span>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 text-right">
+            <a href="/reports/channels" className="text-xs text-primary hover:underline">
+              View detailed channel report →
+            </a>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card>

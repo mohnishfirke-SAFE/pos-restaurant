@@ -13,6 +13,8 @@ import {
   Tag,
   Plug,
   Settings,
+  Truck,
+  ArrowLeftRight,
   type LucideIcon,
 } from "lucide-react";
 import type { Permission } from "@/lib/auth/permissions";
@@ -71,6 +73,7 @@ export const mainNav: NavItem[] = [
       { title: "Categories", href: "/menu/categories", icon: UtensilsCrossed },
       { title: "Modifiers", href: "/menu/modifiers", icon: UtensilsCrossed },
       { title: "Combos", href: "/menu/combos", icon: UtensilsCrossed },
+      { title: "Platform Mapping", href: "/menu/platform-mapping", icon: ArrowLeftRight, permission: "integrations:read" },
     ],
   },
   {
@@ -102,6 +105,14 @@ export const mainNav: NavItem[] = [
     href: "/reports",
     icon: BarChart3,
     permission: "reports:read",
+    children: [
+      { title: "Overview", href: "/reports", icon: BarChart3 },
+      { title: "Sales", href: "/reports/sales", icon: BarChart3 },
+      { title: "Channel Breakdown", href: "/reports/channels", icon: Truck },
+      { title: "Customers", href: "/reports/customers", icon: Users },
+      { title: "Inventory", href: "/reports/inventory", icon: Package },
+      { title: "Staff", href: "/reports/staff", icon: UserCog },
+    ],
   },
   {
     title: "Promotions",
