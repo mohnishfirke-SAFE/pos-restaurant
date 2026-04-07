@@ -11,10 +11,9 @@ export async function POST(request: Request) {
   }
 
   const projectRef = "sioshhykphwbuymzvikl";
-  const rawPassword = process.env.SUPABASE_DB_PASSWORD || body.db_password || "postgres";
-  const dbPassword = encodeURIComponent(rawPassword);
+  const dbPassword = process.env.SUPABASE_DB_PASSWORD || body.db_password || "postgres";
 
-  // Try all Supabase regions for the pooler
+  // Use individual params (avoids URI parsing issues with special chars in password)
   const regions = [
     "aws-0-ap-south-1",
     "aws-0-us-east-1",
@@ -25,20 +24,25 @@ export async function POST(request: Request) {
     "aws-0-ap-northeast-1",
   ];
 
-  const connectionStrings: string[] = [];
+  interface ConnConfig {
+    host: string;
+    port: number;
+    user: string;
+    password: string;
+    database: string;
+    label: string;
+  }
 
-  // Direct connection first
-  connectionStrings.push(
-    `postgresql://postgres:${dbPassword}@db.${projectRef}.supabase.co:5432/postgres`
-  );
+  const connections: ConnConfig[] = [
+    // Direct connection
+    { host: `db.${projectRef}.supabase.co`, port: 5432, user: "postgres", password: dbPassword, database: "postgres", label: "direct" },
+  ];
 
-  // Try all regions with session mode (5432) and transaction mode (6543)
+  // Pooler connections across all regions
   for (const region of regions) {
-    connectionStrings.push(
-      `postgresql://postgres.${projectRef}:${dbPassword}@${region}.pooler.supabase.com:5432/postgres`
-    );
-    connectionStrings.push(
-      `postgresql://postgres.${projectRef}:${dbPassword}@${region}.pooler.supabase.com:6543/postgres`
+    connections.push(
+      { host: `${region}.pooler.supabase.com`, port: 5432, user: `postgres.${projectRef}`, password: dbPassword, database: "postgres", label: `${region}:5432` },
+      { host: `${region}.pooler.supabase.com`, port: 6543, user: `postgres.${projectRef}`, password: dbPassword, database: "postgres", label: `${region}:6543` },
     );
   }
 
@@ -46,20 +50,24 @@ export async function POST(request: Request) {
   let client: Client | null = null;
   let connError = "";
 
-  for (const connStr of connectionStrings) {
+  for (const conn of connections) {
     try {
       const c = new Client({
-        connectionString: connStr,
+        host: conn.host,
+        port: conn.port,
+        user: conn.user,
+        password: conn.password,
+        database: conn.database,
         ssl: { rejectUnauthorized: false },
-        connectionTimeoutMillis: 10000,
+        connectionTimeoutMillis: 8000,
       });
       await c.connect();
       client = c;
-      results.push({ step: "connect", status: "success", error: connStr.replace(dbPassword, "***") });
+      results.push({ step: "connect", status: "success", error: conn.label });
       break;
     } catch (err) {
       connError = err instanceof Error ? err.message : String(err);
-      results.push({ step: "connect_attempt", status: "failed", error: connError });
+      results.push({ step: `connect:${conn.label}`, status: "failed", error: connError });
     }
   }
 
