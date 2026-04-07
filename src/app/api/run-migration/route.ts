@@ -13,17 +13,6 @@ export async function POST(request: Request) {
   const projectRef = "sioshhykphwbuymzvikl";
   const dbPassword = process.env.SUPABASE_DB_PASSWORD || body.db_password || "postgres";
 
-  // Use individual params (avoids URI parsing issues with special chars in password)
-  const regions = [
-    "aws-0-ap-south-1",
-    "aws-0-us-east-1",
-    "aws-0-us-west-1",
-    "aws-0-eu-west-1",
-    "aws-0-eu-central-1",
-    "aws-0-ap-southeast-1",
-    "aws-0-ap-northeast-1",
-  ];
-
   interface ConnConfig {
     host: string;
     port: number;
@@ -34,17 +23,15 @@ export async function POST(request: Request) {
   }
 
   const connections: ConnConfig[] = [
+    // New Supabase pooler format (project-ref based hostname)
+    { host: `${projectRef}.pooler.supabase.com`, port: 5432, user: `postgres.${projectRef}`, password: dbPassword, database: "postgres", label: "pooler-session:5432" },
+    { host: `${projectRef}.pooler.supabase.com`, port: 6543, user: `postgres.${projectRef}`, password: dbPassword, database: "postgres", label: "pooler-transaction:6543" },
     // Direct connection
-    { host: `db.${projectRef}.supabase.co`, port: 5432, user: "postgres", password: dbPassword, database: "postgres", label: "direct" },
+    { host: `db.${projectRef}.supabase.co`, port: 5432, user: "postgres", password: dbPassword, database: "postgres", label: "direct:5432" },
+    // Old pooler format (region-based) - ap-south-1 most likely for India
+    { host: "aws-0-ap-south-1.pooler.supabase.com", port: 5432, user: `postgres.${projectRef}`, password: dbPassword, database: "postgres", label: "old-pooler-ap-south-1:5432" },
+    { host: "aws-0-ap-south-1.pooler.supabase.com", port: 6543, user: `postgres.${projectRef}`, password: dbPassword, database: "postgres", label: "old-pooler-ap-south-1:6543" },
   ];
-
-  // Pooler connections across all regions
-  for (const region of regions) {
-    connections.push(
-      { host: `${region}.pooler.supabase.com`, port: 5432, user: `postgres.${projectRef}`, password: dbPassword, database: "postgres", label: `${region}:5432` },
-      { host: `${region}.pooler.supabase.com`, port: 6543, user: `postgres.${projectRef}`, password: dbPassword, database: "postgres", label: `${region}:6543` },
-    );
-  }
 
   const results: Array<{ step: string; status: string; error?: string }> = [];
   let client: Client | null = null;
