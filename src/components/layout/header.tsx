@@ -2,7 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { useUser } from "@/lib/auth/hooks";
+import { useUser, useRole } from "@/lib/auth/hooks";
+import type { UserRole } from "@/types";
+
+const roleLabels: Record<UserRole, string> = {
+  super_admin: "Super Admin",
+  tenant_owner: "Restaurant Owner",
+  branch_manager: "Branch Manager",
+  cashier: "Cashier",
+  waiter: "Waiter",
+  kitchen_staff: "Kitchen Staff",
+};
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -21,6 +31,7 @@ interface HeaderProps {
 
 export function Header({ onMenuToggle }: HeaderProps) {
   const { user } = useUser();
+  const role = useRole();
   const router = useRouter();
   const supabase = createClient();
 
@@ -60,7 +71,7 @@ export function Header({ onMenuToggle }: HeaderProps) {
           <DropdownMenuLabel className="font-normal">
             <div className="flex flex-col space-y-1">
               <p className="text-sm font-medium">{user?.email}</p>
-              <p className="text-xs text-muted-foreground">Restaurant Owner</p>
+              <p className="text-xs text-muted-foreground">{role ? roleLabels[role] : "Loading..."}</p>
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />

@@ -5,6 +5,49 @@ import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import type { UserRole, JWTClaims } from "@/types";
 
+interface TenantUser {
+  role: UserRole;
+  tenant_id: string;
+  branch_id: string | null;
+  display_name: string;
+}
+
+export function useTenantUser(): { tenantUser: TenantUser | null; loading: boolean } {
+  const [tenantUser, setTenantUser] = useState<TenantUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const supabase = createClient();
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        if (!cancelled) {
+          setTenantUser(null);
+          setLoading(false);
+        }
+        return;
+      }
+      const { data } = await supabase
+        .from("tenant_users")
+        .select("role, tenant_id, branch_id, display_name")
+        .eq("user_id", user.id)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (!cancelled) {
+        setTenantUser(data as TenantUser | null);
+        setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
+
+  return { tenantUser, loading };
+}
+
 export function useUser() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -60,16 +103,16 @@ export function useJWTClaims(): JWTClaims | null {
 }
 
 export function useRole(): UserRole | null {
-  const claims = useJWTClaims();
-  return claims?.user_role ?? null;
+  const { tenantUser } = useTenantUser();
+  return tenantUser?.role ?? null;
 }
 
 export function useTenantId(): string | null {
-  const claims = useJWTClaims();
-  return claims?.tenant_id ?? null;
+  const { tenantUser } = useTenantUser();
+  return tenantUser?.tenant_id ?? null;
 }
 
 export function useBranchId(): string | null {
-  const claims = useJWTClaims();
-  return claims?.branch_id ?? null;
+  const { tenantUser } = useTenantUser();
+  return tenantUser?.branch_id ?? null;
 }

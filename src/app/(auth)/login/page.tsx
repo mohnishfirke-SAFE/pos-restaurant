@@ -30,7 +30,7 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data: signInData, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -41,7 +41,20 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/dashboard");
+    let destination = "/dashboard";
+    if (signInData.user) {
+      const { data: tu } = await supabase
+        .from("tenant_users")
+        .select("role")
+        .eq("user_id", signInData.user.id)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (tu?.role === "super_admin") destination = "/super-admin";
+      else if (tu?.role === "kitchen_staff") destination = "/kitchen";
+      else if (tu?.role === "cashier" || tu?.role === "waiter") destination = "/pos";
+    }
+
+    router.push(destination);
     router.refresh();
   }
 

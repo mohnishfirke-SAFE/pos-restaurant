@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { LayoutDashboard, Building2, CreditCard, Activity } from "lucide-react";
+import { useTenantUser } from "@/lib/auth/hooks";
 
 const adminNav = [
   { title: "Overview", href: "/super-admin", icon: LayoutDashboard },
@@ -14,6 +16,14 @@ const adminNav = [
 
 export default function SuperAdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { tenantUser, loading } = useTenantUser();
+
+  useEffect(() => {
+    if (!loading && tenantUser && tenantUser.role !== "super_admin") {
+      router.replace("/dashboard");
+    }
+  }, [loading, tenantUser, router]);
 
   return (
     <div className="flex min-h-screen">
