@@ -35,111 +35,25 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Plus, Trash2, Eye, FileText } from "lucide-react";
+import { Plus, Trash2, Eye, FileText, Loader2 } from "lucide-react";
+import { useTenantUser } from "@/lib/auth/hooks";
+import { useBranchStore } from "@/stores/branch-store";
+import {
+  usePurchaseOrders,
+  useCreatePurchaseOrder,
+  useSuppliers,
+  useIngredientsForPO,
+} from "@/hooks/use-purchase-orders";
+import type { PurchaseOrderRow } from "@/hooks/use-purchase-orders";
 
 type POStatus = "draft" | "sent" | "partial" | "received" | "cancelled";
 
 interface POLineItem {
   id: string;
-  ingredientName: string;
+  ingredientId: string;
   quantity: number;
   unitCost: number;
 }
-
-interface PurchaseOrder {
-  id: string;
-  poNumber: string;
-  supplier: string;
-  status: POStatus;
-  items: POLineItem[];
-  total: number;
-  expectedDate: string;
-  createdAt: string;
-}
-
-const mockIngredients = [
-  "Basmati Rice",
-  "Chicken Breast",
-  "Olive Oil",
-  "Tomato Puree",
-  "Paneer",
-  "Garam Masala",
-  "Onion",
-  "Butter",
-];
-
-const mockSuppliers = [
-  "Agro Supplies Ltd",
-  "Fresh Meats Co",
-  "Premium Imports",
-  "Dairy Fresh",
-  "Spice World",
-];
-
-const initialOrders: PurchaseOrder[] = [
-  {
-    id: "po-1",
-    poNumber: "PO-2026-001",
-    supplier: "Agro Supplies Ltd",
-    status: "received",
-    items: [
-      { id: "i1", ingredientName: "Basmati Rice", quantity: 50, unitCost: 82 },
-      { id: "i2", ingredientName: "Onion", quantity: 30, unitCost: 38 },
-    ],
-    total: 5240,
-    expectedDate: "2026-03-28",
-    createdAt: "2026-03-25",
-  },
-  {
-    id: "po-2",
-    poNumber: "PO-2026-002",
-    supplier: "Fresh Meats Co",
-    status: "sent",
-    items: [
-      { id: "i3", ingredientName: "Chicken Breast", quantity: 25, unitCost: 275 },
-    ],
-    total: 6875,
-    expectedDate: "2026-04-08",
-    createdAt: "2026-04-04",
-  },
-  {
-    id: "po-3",
-    poNumber: "PO-2026-003",
-    supplier: "Premium Imports",
-    status: "partial",
-    items: [
-      { id: "i4", ingredientName: "Olive Oil", quantity: 10, unitCost: 640 },
-      { id: "i5", ingredientName: "Butter", quantity: 5, unitCost: 510 },
-    ],
-    total: 8950,
-    expectedDate: "2026-04-10",
-    createdAt: "2026-04-02",
-  },
-  {
-    id: "po-4",
-    poNumber: "PO-2026-004",
-    supplier: "Dairy Fresh",
-    status: "draft",
-    items: [
-      { id: "i6", ingredientName: "Paneer", quantity: 15, unitCost: 310 },
-    ],
-    total: 4650,
-    expectedDate: "2026-04-12",
-    createdAt: "2026-04-05",
-  },
-  {
-    id: "po-5",
-    poNumber: "PO-2026-005",
-    supplier: "Spice World",
-    status: "cancelled",
-    items: [
-      { id: "i7", ingredientName: "Garam Masala", quantity: 5, unitCost: 440 },
-    ],
-    total: 2200,
-    expectedDate: "2026-04-01",
-    createdAt: "2026-03-28",
-  },
-];
 
 function getStatusBadge(status: POStatus) {
   const config: Record<POStatus, { label: string; className: string }> = {
@@ -156,20 +70,30 @@ function getStatusBadge(status: POStatus) {
 }
 
 export default function PurchaseOrdersPage() {
-  const [orders, setOrders] = useState<PurchaseOrder[]>(initialOrders);
+  const { tenantUser } = useTenantUser();
+  const { activeBranchId } = useBranchStore();
+  const tenantId = tenantUser?.tenant_id ?? null;
+  const branchId = activeBranchId ?? tenantUser?.branch_id ?? null;
+
+  const { data: orders = [], isLoading } = usePurchaseOrders(tenantId, branchId);
+  const createPO = useCreatePurchaseOrder();
+  const { data: suppliers = [] } = useSuppliers(tenantId);
+  const { data: ingredientsList = [] } = useIngredientsForPO(tenantId);
+
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [viewOrder, setViewOrder] = useState<PurchaseOrder | null>(null);
+  const [viewOrder, setViewOrder] = useState<PurchaseOrderRow | null>(null);
 
   const [newSupplier, setNewSupplier] = useState("");
   const [newExpectedDate, setNewExpectedDate] = useState("");
+  const [newNotes, setNewNotes] = useState("");
   const [newItems, setNewItems] = useState<POLineItem[]>([
-    { id: crypto.randomUUID(), ingredientName: "", quantity: 0, unitCost: 0 },
+    { id: crypto.randomUUID(), ingredientId: "", quantity: 0, unitCost: 0 },
   ]);
 
   function addLineItem() {
     setNewItems((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), ingredientName: "", quantity: 0, unitCost: 0 },
+      { id: crypto.randomUUID(), ingredientId: "", quantity: 0, unitCost: 0 },
     ]);
   }
 
@@ -189,32 +113,58 @@ export default function PurchaseOrdersPage() {
     return items.reduce((sum, item) => sum + item.quantity * item.unitCost, 0);
   }
 
+  function getIngredientName(id: string) {
+    return ingredientsList.find((i) => i.id === id)?.name ?? "Unknown";
+  }
+
   function handleCreatePO() {
-    if (!newSupplier || newItems.length === 0) return;
+    if (!tenantId || !branchId || !newSupplier || newItems.length === 0) return;
 
-    const poNumber = `PO-2026-${String(orders.length + 1).padStart(3, "0")}`;
-    const newOrder: PurchaseOrder = {
-      id: crypto.randomUUID(),
-      poNumber,
-      supplier: newSupplier,
-      status: "draft",
-      items: newItems.filter((i) => i.ingredientName),
-      total: calculateTotal(newItems),
-      expectedDate: newExpectedDate,
-      createdAt: new Date().toISOString().split("T")[0],
-    };
+    const validItems = newItems.filter((i) => i.ingredientId);
+    const poNumber = `PO-${new Date().getFullYear()}-${String(orders.length + 1).padStart(3, "0")}`;
 
-    setOrders((prev) => [newOrder, ...prev]);
-    setDialogOpen(false);
-    resetForm();
+    createPO.mutate(
+      {
+        tenant_id: tenantId,
+        branch_id: branchId,
+        supplier_id: newSupplier,
+        po_number: poNumber,
+        status: "draft",
+        total_amount: calculateTotal(validItems),
+        notes: newNotes || undefined,
+        expected_date: newExpectedDate || undefined,
+        created_by: tenantUser?.display_name ?? undefined,
+        items: validItems.map((item) => ({
+          ingredient_id: item.ingredientId,
+          quantity_ordered: item.quantity,
+          unit_cost: item.unitCost,
+          total_cost: item.quantity * item.unitCost,
+        })),
+      },
+      {
+        onSuccess: () => {
+          setDialogOpen(false);
+          resetForm();
+        },
+      }
+    );
   }
 
   function resetForm() {
     setNewSupplier("");
     setNewExpectedDate("");
+    setNewNotes("");
     setNewItems([
-      { id: crypto.randomUUID(), ingredientName: "", quantity: 0, unitCost: 0 },
+      { id: crypto.randomUUID(), ingredientId: "", quantity: 0, unitCost: 0 },
     ]);
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   return (
@@ -256,9 +206,9 @@ export default function PurchaseOrdersPage() {
                     <SelectValue placeholder="Select supplier" />
                   </SelectTrigger>
                   <SelectContent>
-                    {mockSuppliers.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {s}
+                    {suppliers.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -273,6 +223,14 @@ export default function PurchaseOrdersPage() {
                 />
               </div>
             </div>
+            <div className="grid gap-2">
+              <Label>Notes</Label>
+              <Input
+                value={newNotes}
+                onChange={(e) => setNewNotes(e.target.value)}
+                placeholder="Optional notes"
+              />
+            </div>
 
             <div className="space-y-3">
               <Label>Items</Label>
@@ -281,18 +239,18 @@ export default function PurchaseOrdersPage() {
                   <div className="grid flex-1 gap-2">
                     <Label className="text-xs">Ingredient</Label>
                     <Select
-                      value={item.ingredientName}
+                      value={item.ingredientId}
                       onValueChange={(v) =>
-                        updateLineItem(item.id, "ingredientName", v)
+                        updateLineItem(item.id, "ingredientId", v)
                       }
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select ingredient" />
                       </SelectTrigger>
                       <SelectContent>
-                        {mockIngredients.map((ing) => (
-                          <SelectItem key={ing} value={ing}>
-                            {ing}
+                        {ingredientsList.map((ing) => (
+                          <SelectItem key={ing.id} value={ing.id}>
+                            {ing.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -355,7 +313,12 @@ export default function PurchaseOrdersPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreatePO}>Create Purchase Order</Button>
+            <Button onClick={handleCreatePO} disabled={createPO.isPending}>
+              {createPO.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Create Purchase Order
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -366,7 +329,7 @@ export default function PurchaseOrdersPage() {
       >
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>{viewOrder?.poNumber}</DialogTitle>
+            <DialogTitle>{viewOrder?.po_number}</DialogTitle>
             <DialogDescription>
               Purchase order details
             </DialogDescription>
@@ -376,19 +339,23 @@ export default function PurchaseOrdersPage() {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <span className="text-muted-foreground">Supplier: </span>
-                  <span className="font-medium">{viewOrder.supplier}</span>
+                  <span className="font-medium">{viewOrder.suppliers?.name ?? "-"}</span>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Status: </span>
-                  {getStatusBadge(viewOrder.status)}
+                  {getStatusBadge(viewOrder.status as POStatus)}
                 </div>
                 <div>
                   <span className="text-muted-foreground">Expected: </span>
-                  <span className="font-medium">{viewOrder.expectedDate}</span>
+                  <span className="font-medium">{viewOrder.expected_date ?? "-"}</span>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Created: </span>
-                  <span className="font-medium">{viewOrder.createdAt}</span>
+                  <span className="font-medium">
+                    {viewOrder.created_at
+                      ? new Date(viewOrder.created_at).toLocaleDateString()
+                      : "-"}
+                  </span>
                 </div>
               </div>
               <Table>
@@ -401,15 +368,15 @@ export default function PurchaseOrdersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {viewOrder.items.map((item) => (
+                  {viewOrder.purchase_order_items?.map((item) => (
                     <TableRow key={item.id}>
                       <TableCell className="font-medium">
-                        {item.ingredientName}
+                        {item.ingredients?.name ?? "Unknown"}
                       </TableCell>
-                      <TableCell>{item.quantity}</TableCell>
-                      <TableCell>{formatINR(item.unitCost)}</TableCell>
+                      <TableCell>{item.quantity_ordered}</TableCell>
+                      <TableCell>{formatINR(item.unit_cost)}</TableCell>
                       <TableCell className="text-right">
-                        {formatINR(item.quantity * item.unitCost)}
+                        {formatINR(item.total_cost)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -418,7 +385,7 @@ export default function PurchaseOrdersPage() {
                       Total
                     </TableCell>
                     <TableCell className="text-right font-semibold">
-                      {formatINR(viewOrder.total)}
+                      {formatINR(viewOrder.total_amount)}
                     </TableCell>
                   </TableRow>
                 </TableBody>
@@ -451,13 +418,17 @@ export default function PurchaseOrdersPage() {
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
                         <FileText className="h-4 w-4 text-muted-foreground" />
-                        {order.poNumber}
+                        {order.po_number}
                       </div>
                     </TableCell>
-                    <TableCell>{order.supplier}</TableCell>
-                    <TableCell>{getStatusBadge(order.status)}</TableCell>
-                    <TableCell>{formatINR(order.total)}</TableCell>
-                    <TableCell>{order.expectedDate}</TableCell>
+                    <TableCell>{order.suppliers?.name ?? "-"}</TableCell>
+                    <TableCell>{getStatusBadge(order.status as POStatus)}</TableCell>
+                    <TableCell>{formatINR(order.total_amount)}</TableCell>
+                    <TableCell>
+                      {order.expected_date
+                        ? new Date(order.expected_date).toLocaleDateString()
+                        : "-"}
+                    </TableCell>
                     <TableCell>
                       <Button
                         variant="ghost"

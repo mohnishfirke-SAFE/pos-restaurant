@@ -26,7 +26,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -36,186 +35,129 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Plus, Search, Pencil, Trash2 } from "lucide-react";
-
-interface Ingredient {
-  id: string;
-  name: string;
-  sku: string;
-  barcode: string;
-  category: string;
-  currentStock: number;
-  minLevel: number;
-  maxLevel: number;
-  unit: string;
-  costPerUnit: number;
-  supplier: string;
-  isActive: boolean;
-  lastRestocked: string;
-  createdAt: string;
-}
-
-const initialIngredients: Ingredient[] = [
-  {
-    id: "1",
-    name: "Basmati Rice",
-    sku: "ING-001",
-    barcode: "8901234567890",
-    category: "Grains",
-    currentStock: 50,
-    minLevel: 10,
-    maxLevel: 100,
-    unit: "kg",
-    costPerUnit: 85,
-    supplier: "Agro Supplies Ltd",
-    isActive: true,
-    lastRestocked: "2026-04-01",
-    createdAt: "2026-01-15",
-  },
-  {
-    id: "2",
-    name: "Chicken Breast",
-    sku: "ING-002",
-    barcode: "8901234567891",
-    category: "Meat",
-    currentStock: 5,
-    minLevel: 8,
-    maxLevel: 40,
-    unit: "kg",
-    costPerUnit: 280,
-    supplier: "Fresh Meats Co",
-    isActive: true,
-    lastRestocked: "2026-04-03",
-    createdAt: "2026-01-15",
-  },
-  {
-    id: "3",
-    name: "Olive Oil",
-    sku: "ING-003",
-    barcode: "8901234567892",
-    category: "Oils",
-    currentStock: 12,
-    minLevel: 5,
-    maxLevel: 30,
-    unit: "l",
-    costPerUnit: 650,
-    supplier: "Premium Imports",
-    isActive: true,
-    lastRestocked: "2026-03-28",
-    createdAt: "2026-01-20",
-  },
-  {
-    id: "4",
-    name: "Tomato Puree",
-    sku: "ING-004",
-    barcode: "8901234567893",
-    category: "Sauces",
-    currentStock: 0,
-    minLevel: 3,
-    maxLevel: 20,
-    unit: "l",
-    costPerUnit: 120,
-    supplier: "Agro Supplies Ltd",
-    isActive: true,
-    lastRestocked: "2026-03-15",
-    createdAt: "2026-01-20",
-  },
-  {
-    id: "5",
-    name: "Paneer",
-    sku: "ING-005",
-    barcode: "8901234567894",
-    category: "Dairy",
-    currentStock: 8,
-    minLevel: 5,
-    maxLevel: 25,
-    unit: "kg",
-    costPerUnit: 320,
-    supplier: "Dairy Fresh",
-    isActive: true,
-    lastRestocked: "2026-04-02",
-    createdAt: "2026-02-01",
-  },
-  {
-    id: "6",
-    name: "Garam Masala",
-    sku: "ING-006",
-    barcode: "8901234567895",
-    category: "Spices",
-    currentStock: 2,
-    minLevel: 2,
-    maxLevel: 10,
-    unit: "kg",
-    costPerUnit: 450,
-    supplier: "Spice World",
-    isActive: false,
-    lastRestocked: "2026-03-20",
-    createdAt: "2026-02-10",
-  },
-];
+import { Plus, Search, Pencil, Trash2, Loader2 } from "lucide-react";
+import { useTenantUser } from "@/lib/auth/hooks";
+import {
+  useIngredients,
+  useCreateIngredient,
+  useUpdateIngredient,
+  useDeleteIngredient,
+} from "@/hooks/use-inventory";
 
 export default function IngredientsPage() {
+  const { tenantUser } = useTenantUser();
+  const tenantId = tenantUser?.tenant_id ?? null;
+  const branchId = tenantUser?.branch_id ?? null;
+
+  const { data: ingredients = [], isLoading } = useIngredients(tenantId);
+  const createIngredient = useCreateIngredient();
+  const updateIngredient = useUpdateIngredient();
+  const deleteIngredient = useDeleteIngredient();
+
   const [search, setSearch] = useState("");
-  const [ingredients, setIngredients] = useState<Ingredient[]>(initialIngredients);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingIngredient, setEditingIngredient] = useState<Ingredient | null>(null);
+  const [editingIngredient, setEditingIngredient] = useState<{
+    id: string;
+    name: string;
+    sku: string;
+    barcode: string;
+    unit: string;
+    cost_per_unit: number;
+  } | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const filteredIngredients = ingredients.filter(
     (item) =>
       item.name.toLowerCase().includes(search.toLowerCase()) ||
-      item.sku.toLowerCase().includes(search.toLowerCase()) ||
-      item.category.toLowerCase().includes(search.toLowerCase())
+      item.sku.toLowerCase().includes(search.toLowerCase())
   );
 
   function handleSave(formData: FormData) {
-    const data = {
-      name: formData.get("name") as string,
-      sku: formData.get("sku") as string,
-      barcode: formData.get("barcode") as string,
-      category: formData.get("category") as string,
-      unit: formData.get("unit") as string,
-      costPerUnit: parseFloat(formData.get("costPerUnit") as string),
-      minLevel: parseFloat(formData.get("minLevel") as string),
-      maxLevel: parseFloat(formData.get("maxLevel") as string),
-      supplier: formData.get("supplier") as string,
-    };
+    if (!tenantId) return;
+
+    const name = formData.get("name") as string;
+    const sku = formData.get("sku") as string;
+    const barcode = formData.get("barcode") as string;
+    const unit = formData.get("unit") as string;
+    const cost_per_unit = parseFloat(formData.get("costPerUnit") as string);
 
     if (editingIngredient) {
-      setIngredients((prev) =>
-        prev.map((i) =>
-          i.id === editingIngredient.id ? { ...i, ...data } : i
-        )
+      updateIngredient.mutate(
+        {
+          id: editingIngredient.id,
+          tenant_id: tenantId,
+          name,
+          sku,
+          barcode,
+          unit,
+          cost_per_unit,
+        },
+        {
+          onSuccess: () => {
+            setDialogOpen(false);
+            setEditingIngredient(null);
+          },
+        }
       );
     } else {
-      const newIngredient: Ingredient = {
-        id: crypto.randomUUID(),
-        ...data,
-        currentStock: 0,
-        isActive: true,
-        lastRestocked: "-",
-        createdAt: new Date().toISOString().split("T")[0],
-      };
-      setIngredients((prev) => [...prev, newIngredient]);
+      if (!branchId) return;
+      createIngredient.mutate(
+        {
+          tenant_id: tenantId,
+          branch_id: branchId,
+          name,
+          sku,
+          barcode: barcode || undefined,
+          unit,
+          cost_per_unit,
+          min_stock_level: parseFloat(formData.get("minLevel") as string),
+          max_stock_level: parseFloat(formData.get("maxLevel") as string) || 0,
+        },
+        {
+          onSuccess: () => {
+            setDialogOpen(false);
+            setEditingIngredient(null);
+          },
+        }
+      );
     }
-
-    setDialogOpen(false);
-    setEditingIngredient(null);
   }
 
   function handleDelete(id: string) {
-    setIngredients((prev) => prev.filter((i) => i.id !== id));
-    setDeleteConfirmId(null);
+    if (!tenantId) return;
+    deleteIngredient.mutate(
+      { id, tenant_id: tenantId },
+      {
+        onSuccess: () => {
+          setDeleteConfirmId(null);
+        },
+      }
+    );
   }
 
-  function openEditDialog(ingredient: Ingredient) {
-    setEditingIngredient(ingredient);
+  function openEditDialog(item: typeof ingredients[number]) {
+    setEditingIngredient({
+      id: item.id,
+      name: item.name,
+      sku: item.sku,
+      barcode: item.barcode ?? "",
+      unit: item.unit,
+      cost_per_unit: item.cost_per_unit,
+    });
     setDialogOpen(true);
   }
 
   function openAddDialog() {
     setEditingIngredient(null);
     setDialogOpen(true);
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   return (
@@ -282,15 +224,6 @@ export default function IngredientsPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="category">Category</Label>
-                  <Input
-                    id="category"
-                    name="category"
-                    defaultValue={editingIngredient?.category ?? ""}
-                    required
-                  />
-                </div>
-                <div className="grid gap-2">
                   <Label htmlFor="unit">Unit</Label>
                   <Select
                     name="unit"
@@ -309,8 +242,6 @@ export default function IngredientsPage() {
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="costPerUnit">Cost/Unit (INR)</Label>
                   <Input
@@ -318,44 +249,45 @@ export default function IngredientsPage() {
                     name="costPerUnit"
                     type="number"
                     step="0.01"
-                    defaultValue={editingIngredient?.costPerUnit ?? ""}
-                    required
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="minLevel">Min Level</Label>
-                  <Input
-                    id="minLevel"
-                    name="minLevel"
-                    type="number"
-                    step="0.01"
-                    defaultValue={editingIngredient?.minLevel ?? ""}
-                    required
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="maxLevel">Max Level</Label>
-                  <Input
-                    id="maxLevel"
-                    name="maxLevel"
-                    type="number"
-                    step="0.01"
-                    defaultValue={editingIngredient?.maxLevel ?? ""}
+                    defaultValue={editingIngredient?.cost_per_unit ?? ""}
                     required
                   />
                 </div>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="supplier">Supplier</Label>
-                <Input
-                  id="supplier"
-                  name="supplier"
-                  defaultValue={editingIngredient?.supplier ?? ""}
-                />
-              </div>
+              {!editingIngredient && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="minLevel">Min Level</Label>
+                    <Input
+                      id="minLevel"
+                      name="minLevel"
+                      type="number"
+                      step="0.01"
+                      defaultValue={0}
+                      required
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="maxLevel">Max Level</Label>
+                    <Input
+                      id="maxLevel"
+                      name="maxLevel"
+                      type="number"
+                      step="0.01"
+                      defaultValue={0}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
             <DialogFooter>
-              <Button type="submit">
+              <Button
+                type="submit"
+                disabled={createIngredient.isPending || updateIngredient.isPending}
+              >
+                {(createIngredient.isPending || updateIngredient.isPending) && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
                 {editingIngredient ? "Save Changes" : "Add Ingredient"}
               </Button>
             </DialogFooter>
@@ -381,8 +313,12 @@ export default function IngredientsPage() {
             </Button>
             <Button
               variant="destructive"
+              disabled={deleteIngredient.isPending}
               onClick={() => deleteConfirmId && handleDelete(deleteConfirmId)}
             >
+              {deleteIngredient.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
               Delete
             </Button>
           </DialogFooter>
@@ -396,7 +332,7 @@ export default function IngredientsPage() {
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search by name, SKU, or category..."
+                placeholder="Search by name or SKU..."
                 className="w-80 pl-8"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -411,14 +347,11 @@ export default function IngredientsPage() {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>SKU</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Stock</TableHead>
-                  <TableHead>Min / Max</TableHead>
+                  <TableHead>Barcode</TableHead>
                   <TableHead>Unit</TableHead>
                   <TableHead>Cost/Unit</TableHead>
-                  <TableHead>Supplier</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Last Restocked</TableHead>
+                  <TableHead>Created</TableHead>
                   <TableHead className="w-24">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -429,20 +362,19 @@ export default function IngredientsPage() {
                     <TableCell className="text-muted-foreground">
                       {item.sku}
                     </TableCell>
-                    <TableCell>{item.category}</TableCell>
-                    <TableCell>{item.currentStock}</TableCell>
-                    <TableCell>
-                      {item.minLevel} / {item.maxLevel}
+                    <TableCell className="text-muted-foreground">
+                      {item.barcode || "-"}
                     </TableCell>
                     <TableCell>{item.unit}</TableCell>
-                    <TableCell>{formatINR(item.costPerUnit)}</TableCell>
-                    <TableCell>{item.supplier || "-"}</TableCell>
+                    <TableCell>{formatINR(item.cost_per_unit)}</TableCell>
                     <TableCell>
-                      <Badge variant={item.isActive ? "default" : "secondary"}>
-                        {item.isActive ? "Active" : "Inactive"}
+                      <Badge variant={item.is_active ? "default" : "secondary"}>
+                        {item.is_active ? "Active" : "Inactive"}
                       </Badge>
                     </TableCell>
-                    <TableCell>{item.lastRestocked}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {item.created_at ? new Date(item.created_at).toLocaleDateString() : "-"}
+                    </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
                         <Button

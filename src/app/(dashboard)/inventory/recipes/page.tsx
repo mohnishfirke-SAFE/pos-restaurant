@@ -28,104 +28,55 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Plus, Trash2, UtensilsCrossed } from "lucide-react";
+import { Plus, Trash2, UtensilsCrossed, Loader2 } from "lucide-react";
+import { useTenantUser } from "@/lib/auth/hooks";
+import {
+  useRecipes,
+  useSaveRecipe,
+  useMenuItemsForSelect,
+  useIngredientsForSelect,
+} from "@/hooks/use-recipes";
+import type { RecipeRow } from "@/hooks/use-recipes";
 
-interface Ingredient {
-  id: string;
-  name: string;
-  unit: string;
-  costPerUnit: number;
-}
-
-interface RecipeRow {
+interface BuilderRow {
   id: string;
   ingredientId: string;
   quantity: number;
   unit: string;
 }
 
-interface Recipe {
-  id: string;
-  menuItemId: string;
-  menuItemName: string;
-  rows: RecipeRow[];
-}
-
-const mockIngredients: Ingredient[] = [
-  { id: "ing-1", name: "Basmati Rice", unit: "kg", costPerUnit: 85 },
-  { id: "ing-2", name: "Chicken Breast", unit: "kg", costPerUnit: 280 },
-  { id: "ing-3", name: "Olive Oil", unit: "l", costPerUnit: 650 },
-  { id: "ing-4", name: "Tomato Puree", unit: "l", costPerUnit: 120 },
-  { id: "ing-5", name: "Paneer", unit: "kg", costPerUnit: 320 },
-  { id: "ing-6", name: "Garam Masala", unit: "kg", costPerUnit: 450 },
-  { id: "ing-7", name: "Onion", unit: "kg", costPerUnit: 40 },
-  { id: "ing-8", name: "Butter", unit: "kg", costPerUnit: 520 },
-];
-
-const mockMenuItems = [
-  { id: "menu-1", name: "Chicken Biryani" },
-  { id: "menu-2", name: "Paneer Butter Masala" },
-  { id: "menu-3", name: "Veg Fried Rice" },
-  { id: "menu-4", name: "Butter Chicken" },
-];
-
-const initialRecipes: Recipe[] = [
-  {
-    id: "recipe-1",
-    menuItemId: "menu-1",
-    menuItemName: "Chicken Biryani",
-    rows: [
-      { id: "r1-1", ingredientId: "ing-1", quantity: 0.3, unit: "kg" },
-      { id: "r1-2", ingredientId: "ing-2", quantity: 0.25, unit: "kg" },
-      { id: "r1-3", ingredientId: "ing-3", quantity: 0.03, unit: "l" },
-      { id: "r1-4", ingredientId: "ing-6", quantity: 0.01, unit: "kg" },
-      { id: "r1-5", ingredientId: "ing-7", quantity: 0.15, unit: "kg" },
-    ],
-  },
-  {
-    id: "recipe-2",
-    menuItemId: "menu-2",
-    menuItemName: "Paneer Butter Masala",
-    rows: [
-      { id: "r2-1", ingredientId: "ing-5", quantity: 0.2, unit: "kg" },
-      { id: "r2-2", ingredientId: "ing-4", quantity: 0.15, unit: "l" },
-      { id: "r2-3", ingredientId: "ing-8", quantity: 0.05, unit: "kg" },
-      { id: "r2-4", ingredientId: "ing-6", quantity: 0.005, unit: "kg" },
-      { id: "r2-5", ingredientId: "ing-7", quantity: 0.1, unit: "kg" },
-    ],
-  },
-  {
-    id: "recipe-3",
-    menuItemId: "menu-4",
-    menuItemName: "Butter Chicken",
-    rows: [
-      { id: "r3-1", ingredientId: "ing-2", quantity: 0.25, unit: "kg" },
-      { id: "r3-2", ingredientId: "ing-4", quantity: 0.2, unit: "l" },
-      { id: "r3-3", ingredientId: "ing-8", quantity: 0.05, unit: "kg" },
-      { id: "r3-4", ingredientId: "ing-6", quantity: 0.008, unit: "kg" },
-      { id: "r3-5", ingredientId: "ing-7", quantity: 0.12, unit: "kg" },
-    ],
-  },
-];
-
-function getIngredientById(id: string) {
-  return mockIngredients.find((i) => i.id === id);
-}
-
-function calculateRowCost(row: RecipeRow): number {
-  const ingredient = getIngredientById(row.ingredientId);
-  if (!ingredient) return 0;
-  return row.quantity * ingredient.costPerUnit;
-}
-
-function calculateRecipeCost(rows: RecipeRow[]): number {
-  return rows.reduce((sum, row) => sum + calculateRowCost(row), 0);
-}
-
 export default function RecipesPage() {
-  const [recipes, setRecipes] = useState<Recipe[]>(initialRecipes);
+  const { tenantUser } = useTenantUser();
+  const tenantId = tenantUser?.tenant_id ?? null;
+
+  const { data: recipes = [], isLoading } = useRecipes(tenantId);
+  const saveRecipe = useSaveRecipe();
+  const { data: menuItems = [] } = useMenuItemsForSelect(tenantId);
+  const { data: ingredientsList = [] } = useIngredientsForSelect(tenantId);
+
   const [selectedMenuItem, setSelectedMenuItem] = useState<string>("");
-  const [builderRows, setBuilderRows] = useState<RecipeRow[]>([]);
+  const [builderRows, setBuilderRows] = useState<BuilderRow[]>([]);
+
+  function getIngredientById(id: string) {
+    return ingredientsList.find((i) => i.id === id);
+  }
+
+  function calculateRowCost(row: BuilderRow): number {
+    const ingredient = getIngredientById(row.ingredientId);
+    if (!ingredient) return 0;
+    return row.quantity * ingredient.cost_per_unit;
+  }
+
+  function calculateRecipeCostFromRows(rows: BuilderRow[]): number {
+    return rows.reduce((sum, row) => sum + calculateRowCost(row), 0);
+  }
+
+  function calculateRecipeCostFromDb(rows: RecipeRow[]): number {
+    return rows.reduce((sum, row) => {
+      const cost = row.ingredients?.cost_per_unit ?? 0;
+      return sum + row.quantity_needed * cost;
+    }, 0);
+  }
 
   function addBuilderRow() {
     setBuilderRows((prev) => [
@@ -139,7 +90,7 @@ export default function RecipesPage() {
     ]);
   }
 
-  function updateBuilderRow(id: string, field: keyof RecipeRow, value: string | number) {
+  function updateBuilderRow(id: string, field: keyof BuilderRow, value: string | number) {
     setBuilderRows((prev) =>
       prev.map((row) => {
         if (row.id !== id) return row;
@@ -156,42 +107,46 @@ export default function RecipesPage() {
     setBuilderRows((prev) => prev.filter((row) => row.id !== id));
   }
 
-  function saveRecipe() {
-    if (!selectedMenuItem || builderRows.length === 0) return;
-    const menuItem = mockMenuItems.find((m) => m.id === selectedMenuItem);
-    if (!menuItem) return;
+  function saveRecipeHandler() {
+    if (!tenantId || !selectedMenuItem || builderRows.length === 0) return;
 
-    const existingIndex = recipes.findIndex(
-      (r) => r.menuItemId === selectedMenuItem
-    );
-
-    if (existingIndex >= 0) {
-      setRecipes((prev) =>
-        prev.map((r) =>
-          r.menuItemId === selectedMenuItem
-            ? { ...r, rows: builderRows }
-            : r
-        )
-      );
-    } else {
-      setRecipes((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          menuItemId: selectedMenuItem,
-          menuItemName: menuItem.name,
-          rows: builderRows,
+    saveRecipe.mutate(
+      {
+        tenant_id: tenantId,
+        menu_item_id: selectedMenuItem,
+        rows: builderRows.map((r) => ({
+          ingredient_id: r.ingredientId,
+          quantity_needed: r.quantity,
+          unit: r.unit,
+        })),
+      },
+      {
+        onSuccess: () => {
+          setSelectedMenuItem("");
+          setBuilderRows([]);
         },
-      ]);
-    }
-
-    setSelectedMenuItem("");
-    setBuilderRows([]);
+      }
+    );
   }
 
-  function loadRecipeForEdit(recipe: Recipe) {
-    setSelectedMenuItem(recipe.menuItemId);
-    setBuilderRows([...recipe.rows]);
+  function loadRecipeForEdit(recipe: { menu_item_id: string; rows: RecipeRow[] }) {
+    setSelectedMenuItem(recipe.menu_item_id);
+    setBuilderRows(
+      recipe.rows.map((r) => ({
+        id: crypto.randomUUID(),
+        ingredientId: r.ingredient_id,
+        quantity: r.quantity_needed,
+        unit: r.unit,
+      }))
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   return (
@@ -221,7 +176,7 @@ export default function RecipesPage() {
                   <SelectValue placeholder="Select a menu item" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockMenuItems.map((item) => (
+                  {menuItems.map((item) => (
                     <SelectItem key={item.id} value={item.id}>
                       {item.name}
                     </SelectItem>
@@ -254,7 +209,7 @@ export default function RecipesPage() {
                             <SelectValue placeholder="Select ingredient" />
                           </SelectTrigger>
                           <SelectContent>
-                            {mockIngredients.map((ing) => (
+                            {ingredientsList.map((ing) => (
                               <SelectItem key={ing.id} value={ing.id}>
                                 {ing.name}
                               </SelectItem>
@@ -319,16 +274,19 @@ export default function RecipesPage() {
                 <div className="text-right">
                   {builderRows.length > 0 && (
                     <div className="text-lg font-semibold">
-                      Total Cost: {formatINR(calculateRecipeCost(builderRows))}
+                      Total Cost: {formatINR(calculateRecipeCostFromRows(builderRows))}
                     </div>
                   )}
                 </div>
               </div>
               <div className="flex justify-end">
                 <Button
-                  onClick={saveRecipe}
-                  disabled={builderRows.length === 0}
+                  onClick={saveRecipeHandler}
+                  disabled={builderRows.length === 0 || saveRecipe.isPending}
                 >
+                  {saveRecipe.isPending && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
                   Save Recipe
                 </Button>
               </div>
@@ -346,19 +304,19 @@ export default function RecipesPage() {
             <div className="space-y-6">
               {recipes.map((recipe) => (
                 <div
-                  key={recipe.id}
+                  key={recipe.menu_item_id}
                   className="rounded-lg border p-4 space-y-3"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <UtensilsCrossed className="h-5 w-5 text-muted-foreground" />
                       <h3 className="text-lg font-semibold">
-                        {recipe.menuItemName}
+                        {recipe.menu_item_name}
                       </h3>
                     </div>
                     <div className="flex items-center gap-3">
                       <Badge variant="secondary">
-                        Cost: {formatINR(calculateRecipeCost(recipe.rows))}
+                        Cost: {formatINR(calculateRecipeCostFromDb(recipe.rows))}
                       </Badge>
                       <Button
                         variant="outline"
@@ -380,26 +338,26 @@ export default function RecipesPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {recipe.rows.map((row) => {
-                        const ingredient = getIngredientById(row.ingredientId);
-                        return (
-                          <TableRow key={row.id}>
-                            <TableCell className="font-medium">
-                              {ingredient?.name ?? "Unknown"}
-                            </TableCell>
-                            <TableCell>{row.quantity}</TableCell>
-                            <TableCell>{row.unit}</TableCell>
-                            <TableCell>
-                              {ingredient
-                                ? formatINR(ingredient.costPerUnit)
-                                : "-"}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {formatINR(calculateRowCost(row))}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
+                      {recipe.rows.map((row) => (
+                        <TableRow key={row.id}>
+                          <TableCell className="font-medium">
+                            {row.ingredients?.name ?? "Unknown"}
+                          </TableCell>
+                          <TableCell>{row.quantity_needed}</TableCell>
+                          <TableCell>{row.unit}</TableCell>
+                          <TableCell>
+                            {row.ingredients
+                              ? formatINR(row.ingredients.cost_per_unit)
+                              : "-"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {formatINR(
+                              row.quantity_needed *
+                                (row.ingredients?.cost_per_unit ?? 0)
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
                       <TableRow>
                         <TableCell
                           colSpan={4}
@@ -408,7 +366,7 @@ export default function RecipesPage() {
                           Total
                         </TableCell>
                         <TableCell className="text-right font-semibold">
-                          {formatINR(calculateRecipeCost(recipe.rows))}
+                          {formatINR(calculateRecipeCostFromDb(recipe.rows))}
                         </TableCell>
                       </TableRow>
                     </TableBody>

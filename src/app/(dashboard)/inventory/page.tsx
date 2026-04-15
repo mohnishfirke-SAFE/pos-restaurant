@@ -42,81 +42,14 @@ import {
   Package,
   AlertTriangle,
   IndianRupee,
+  Loader2,
 } from "lucide-react";
-
-interface Ingredient {
-  id: string;
-  name: string;
-  sku: string;
-  barcode: string;
-  currentStock: number;
-  minLevel: number;
-  unit: string;
-  costPerUnit: number;
-}
-
-const mockIngredients: Ingredient[] = [
-  {
-    id: "1",
-    name: "Basmati Rice",
-    sku: "ING-001",
-    barcode: "8901234567890",
-    currentStock: 50,
-    minLevel: 10,
-    unit: "kg",
-    costPerUnit: 85,
-  },
-  {
-    id: "2",
-    name: "Chicken Breast",
-    sku: "ING-002",
-    barcode: "8901234567891",
-    currentStock: 5,
-    minLevel: 8,
-    unit: "kg",
-    costPerUnit: 280,
-  },
-  {
-    id: "3",
-    name: "Olive Oil",
-    sku: "ING-003",
-    barcode: "8901234567892",
-    currentStock: 12,
-    minLevel: 5,
-    unit: "l",
-    costPerUnit: 650,
-  },
-  {
-    id: "4",
-    name: "Tomato Puree",
-    sku: "ING-004",
-    barcode: "8901234567893",
-    currentStock: 0,
-    minLevel: 3,
-    unit: "l",
-    costPerUnit: 120,
-  },
-  {
-    id: "5",
-    name: "Paneer",
-    sku: "ING-005",
-    barcode: "8901234567894",
-    currentStock: 8,
-    minLevel: 5,
-    unit: "kg",
-    costPerUnit: 320,
-  },
-  {
-    id: "6",
-    name: "Garam Masala",
-    sku: "ING-006",
-    barcode: "8901234567895",
-    currentStock: 2,
-    minLevel: 2,
-    unit: "kg",
-    costPerUnit: 450,
-  },
-];
+import { useTenantUser } from "@/lib/auth/hooks";
+import { useBranchStore } from "@/stores/branch-store";
+import {
+  useStockOverview,
+  useCreateIngredient,
+} from "@/hooks/use-inventory";
 
 function getStockStatus(current: number, min: number) {
   if (current === 0) return "Out of Stock";
@@ -138,37 +71,63 @@ function getStatusBadge(status: string) {
 }
 
 export default function InventoryOverviewPage() {
+  const { tenantUser } = useTenantUser();
+  const { activeBranchId } = useBranchStore();
+  const tenantId = tenantUser?.tenant_id ?? null;
+  const branchId = activeBranchId ?? tenantUser?.branch_id ?? null;
+
+  const { data: stockData = [], isLoading } = useStockOverview(tenantId, branchId);
+  const createIngredient = useCreateIngredient();
+
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [ingredients, setIngredients] = useState<Ingredient[]>(mockIngredients);
 
-  const filteredIngredients = ingredients.filter((item) =>
-    item.name.toLowerCase().includes(search.toLowerCase()) ||
-    item.sku.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredStock = stockData.filter((item) => {
+    const name = item.ingredients?.name ?? "";
+    const sku = item.ingredients?.sku ?? "";
+    return (
+      name.toLowerCase().includes(search.toLowerCase()) ||
+      sku.toLowerCase().includes(search.toLowerCase())
+    );
+  });
 
-  const totalItems = ingredients.length;
-  const lowStockCount = ingredients.filter(
-    (i) => i.currentStock <= i.minLevel && i.currentStock > 0
-  ).length + ingredients.filter((i) => i.currentStock === 0).length;
-  const totalValue = ingredients.reduce(
-    (sum, i) => sum + i.currentStock * i.costPerUnit,
+  const totalItems = stockData.length;
+  const lowStockCount = stockData.filter(
+    (i) => i.current_stock <= i.min_stock_level
+  ).length;
+  const totalValue = stockData.reduce(
+    (sum, i) => sum + i.current_stock * (i.ingredients?.cost_per_unit ?? 0),
     0
   );
 
   function handleAddIngredient(formData: FormData) {
-    const newIngredient: Ingredient = {
-      id: crypto.randomUUID(),
-      name: formData.get("name") as string,
-      sku: formData.get("sku") as string,
-      barcode: formData.get("barcode") as string,
-      currentStock: 0,
-      minLevel: parseFloat(formData.get("minLevel") as string),
-      unit: formData.get("unit") as string,
-      costPerUnit: parseFloat(formData.get("costPerUnit") as string),
-    };
-    setIngredients((prev) => [...prev, newIngredient]);
-    setDialogOpen(false);
+    if (!tenantId || !branchId) return;
+    createIngredient.mutate(
+      {
+        tenant_id: tenantId,
+        branch_id: branchId,
+        name: formData.get("name") as string,
+        unit: formData.get("unit") as string,
+        sku: formData.get("sku") as string,
+        barcode: (formData.get("barcode") as string) || undefined,
+        cost_per_unit: parseFloat(formData.get("costPerUnit") as string),
+        min_stock_level: parseFloat(formData.get("minLevel") as string),
+        max_stock_level: parseFloat(formData.get("maxLevel") as string) || 0,
+      },
+      {
+        onSuccess: () => {
+          setDialogOpen(false);
+        },
+      }
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   return (
@@ -252,9 +211,23 @@ export default function InventoryOverviewPage() {
                     />
                   </div>
                 </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="maxLevel">Max Stock Level</Label>
+                  <Input
+                    id="maxLevel"
+                    name="maxLevel"
+                    type="number"
+                    step="0.01"
+                  />
+                </div>
               </div>
               <DialogFooter>
-                <Button type="submit">Add Ingredient</Button>
+                <Button type="submit" disabled={createIngredient.isPending}>
+                  {createIngredient.isPending && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  Add Ingredient
+                </Button>
               </DialogFooter>
             </form>
           </DialogContent>
@@ -318,7 +291,7 @@ export default function InventoryOverviewPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {filteredIngredients.length > 0 ? (
+          {filteredStock.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -331,21 +304,23 @@ export default function InventoryOverviewPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredIngredients.map((item) => {
-                  const status = getStockStatus(item.currentStock, item.minLevel);
+                {filteredStock.map((item) => {
+                  const status = getStockStatus(item.current_stock, item.min_stock_level);
                   const isLow = status === "Low" || status === "Out of Stock";
                   return (
                     <TableRow
                       key={item.id}
                       className={isLow ? "bg-red-50 dark:bg-red-950/20" : ""}
                     >
-                      <TableCell className="font-medium">{item.name}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {item.sku}
+                      <TableCell className="font-medium">
+                        {item.ingredients?.name ?? "Unknown"}
                       </TableCell>
-                      <TableCell>{item.currentStock}</TableCell>
-                      <TableCell>{item.minLevel}</TableCell>
-                      <TableCell>{item.unit}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {item.ingredients?.sku ?? "-"}
+                      </TableCell>
+                      <TableCell>{item.current_stock}</TableCell>
+                      <TableCell>{item.min_stock_level}</TableCell>
+                      <TableCell>{item.ingredients?.unit ?? "-"}</TableCell>
                       <TableCell>{getStatusBadge(status)}</TableCell>
                     </TableRow>
                   );
