@@ -38,7 +38,6 @@ import {
 import {
   Search,
   Eye,
-  CalendarDays,
   ShoppingBag,
   Utensils,
   Truck,
@@ -49,6 +48,9 @@ import {
   Phone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useOrders } from "@/hooks/use-orders";
+import { useTenantUser } from "@/lib/auth/hooks";
+import { useBranchStore } from "@/stores/branch-store";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,8 +82,8 @@ interface Order {
   status: OrderStatus;
   createdAt: string;
   customerName?: string;
-  // Platform-specific fields
   aggregatorOrderId?: string;
+  aggregatorPlatform?: string;
   deliveryPartnerName?: string;
   deliveryPartnerPhone?: string;
   pickupEta?: string;
@@ -91,156 +93,154 @@ interface Order {
 }
 
 // ---------------------------------------------------------------------------
-// Mock data
+// Helpers
 // ---------------------------------------------------------------------------
-const MOCK_ORDERS: Order[] = [
-  {
-    id: "1",
-    orderNumber: "ORD-MN-00145",
-    source: "dine_in",
-    table: "T3",
-    items: [
-      { name: "Butter Chicken", quantity: 2, price: 400 },
-      { name: "Garlic Naan", quantity: 4, price: 60 },
-    ],
-    total: 1040,
-    status: "preparing",
-    createdAt: "2026-04-06T13:15:00",
-    customerName: "Walk-in",
-  },
-  {
-    id: "2",
-    orderNumber: "ORD-MN-00146",
-    source: "zomato",
-    table: null,
-    items: [
-      { name: "Chicken Biryani", quantity: 1, price: 350 },
-      { name: "Paneer Tikka", quantity: 1, price: 280 },
-    ],
-    total: 630,
-    status: "confirmed",
-    createdAt: "2026-04-06T13:20:00",
-    customerName: "Rahul Kumar",
-    aggregatorOrderId: "ZMT-98765",
-    deliveryPartnerName: "Amit S.",
-    deliveryPartnerPhone: "+91-9876543210",
-    pickupEta: "2026-04-06T13:45:00",
-    commissionPct: 25,
-    commissionAmount: 157.5,
-    autoAccepted: true,
-  },
-  {
-    id: "3",
-    orderNumber: "ORD-MN-00147",
-    source: "swiggy",
-    table: null,
-    items: [
-      { name: "Veg Thali", quantity: 3, price: 250 },
-    ],
-    total: 750,
-    status: "preparing",
-    createdAt: "2026-04-06T13:22:00",
-    customerName: "Priya M.",
-    aggregatorOrderId: "SWG-45678",
-    deliveryPartnerName: "Raju D.",
-    deliveryPartnerPhone: "+91-8765432109",
-    pickupEta: "2026-04-06T13:50:00",
-    commissionPct: 20,
-    commissionAmount: 150,
-    autoAccepted: false,
-  },
-  {
-    id: "4",
-    orderNumber: "ORD-MN-00148",
-    source: "takeaway",
-    table: null,
-    items: [
-      { name: "Masala Dosa", quantity: 2, price: 180 },
-      { name: "Filter Coffee", quantity: 2, price: 80 },
-    ],
-    total: 520,
-    status: "ready",
-    createdAt: "2026-04-06T13:10:00",
-    customerName: "Sanjay P.",
-  },
-  {
-    id: "5",
-    orderNumber: "ORD-MN-00149",
-    source: "zomato",
-    table: null,
-    items: [
-      { name: "Chole Bhature", quantity: 1, price: 200 },
-      { name: "Lassi", quantity: 1, price: 100 },
-    ],
-    total: 300,
-    status: "ready",
-    createdAt: "2026-04-06T12:55:00",
-    customerName: "Vinod K.",
-    aggregatorOrderId: "ZMT-87654",
-    deliveryPartnerName: "Suresh M.",
-    deliveryPartnerPhone: "+91-7654321098",
-    commissionPct: 25,
-    commissionAmount: 75,
-    autoAccepted: true,
-  },
-  {
-    id: "6",
-    orderNumber: "ORD-MN-00142",
-    source: "dine_in",
-    table: "T7",
-    items: [
-      { name: "Tandoori Platter", quantity: 1, price: 550 },
-      { name: "Biryani", quantity: 2, price: 350 },
-    ],
-    total: 1250,
-    status: "completed",
-    createdAt: "2026-04-06T12:30:00",
-  },
-  {
-    id: "7",
-    orderNumber: "ORD-MN-00150",
-    source: "swiggy",
-    table: null,
-    items: [
-      { name: "Chicken Biryani", quantity: 2, price: 350 },
-    ],
-    total: 700,
-    status: "draft",
-    createdAt: "2026-04-06T13:25:00",
-    customerName: "Meera R.",
-    aggregatorOrderId: "SWG-56789",
-    commissionPct: 20,
-    commissionAmount: 140,
-    autoAccepted: false,
-  },
-];
+
+/** Map DB order_type + aggregator_platform to a UI OrderSource */
+function mapSource(
+  orderType: string,
+  aggregatorPlatform?: string | null
+): OrderSource {
+  if (orderType === "dine_in") return "dine_in";
+  if (orderType === "takeaway") return "takeaway";
+  if (orderType === "delivery") return "delivery";
+  if (orderType === "aggregator") {
+    if (aggregatorPlatform === "swiggy") return "swiggy";
+    return "zomato"; // default aggregator to zomato
+  }
+  return "dine_in";
+}
+
+/** Format a date string as a relative time label (e.g. "2m ago", "1h ago") */
+function formatRelativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHrs = Math.floor(diffMin / 60);
+  if (diffHrs < 24) return `${diffHrs}h ago`;
+  const diffDays = Math.floor(diffHrs / 24);
+  return `${diffDays}d ago`;
+}
+
+/** Transform raw DB rows returned by useOrders into the UI-friendly Order[] */
+function transformOrders(raw: any[]): Order[] {
+  return raw.map((row) => {
+    const source = mapSource(row.order_type, row.aggregator_platform);
+
+    const items: OrderItem[] = (row.order_items ?? []).map((oi: any) => ({
+      name: oi.menu_items?.name ?? oi.menu_item_id ?? "Unknown item",
+      quantity: oi.quantity,
+      price: Number(oi.unit_price ?? 0),
+    }));
+
+    return {
+      id: row.id,
+      orderNumber: row.order_number ?? row.id.slice(0, 8).toUpperCase(),
+      source,
+      table:
+        source === "dine_in" && row.restaurant_tables?.table_number
+          ? `T${row.restaurant_tables.table_number}`
+          : null,
+      items,
+      total: Number(row.total ?? 0),
+      status: row.status as OrderStatus,
+      createdAt: row.created_at,
+      customerName: row.customers?.name ?? undefined,
+      aggregatorOrderId: row.aggregator_order_id ?? undefined,
+      aggregatorPlatform: row.aggregator_platform ?? undefined,
+      deliveryPartnerName: row.delivery_partner_name ?? undefined,
+      deliveryPartnerPhone: row.delivery_partner_phone ?? undefined,
+      pickupEta: row.pickup_eta ?? undefined,
+      commissionPct: row.commission_pct ?? undefined,
+      commissionAmount: row.commission_amount
+        ? Number(row.commission_amount)
+        : undefined,
+      autoAccepted: row.auto_accepted ?? undefined,
+    };
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
-const SOURCE_CONFIG: Record<OrderSource, { label: string; color: string; logo?: string; bgColor?: string }> = {
-  dine_in: { label: "Dine-in", color: "bg-blue-100 text-blue-700 border-blue-200" },
-  takeaway: { label: "Takeaway", color: "bg-purple-100 text-purple-700 border-purple-200" },
-  delivery: { label: "Delivery", color: "bg-indigo-100 text-indigo-700 border-indigo-200" },
-  zomato: { label: "Zomato", color: "text-white border-red-600", logo: "Z", bgColor: "bg-red-600" },
-  swiggy: { label: "Swiggy", color: "text-white border-orange-500", logo: "S", bgColor: "bg-orange-500" },
+const SOURCE_CONFIG: Record<
+  OrderSource,
+  { label: string; color: string; logo?: string; bgColor?: string }
+> = {
+  dine_in: {
+    label: "Dine-in",
+    color: "bg-blue-100 text-blue-700 border-blue-200",
+  },
+  takeaway: {
+    label: "Takeaway",
+    color: "bg-purple-100 text-purple-700 border-purple-200",
+  },
+  delivery: {
+    label: "Delivery",
+    color: "bg-indigo-100 text-indigo-700 border-indigo-200",
+  },
+  zomato: {
+    label: "Zomato",
+    color: "text-white border-red-600",
+    logo: "Z",
+    bgColor: "bg-red-600",
+  },
+  swiggy: {
+    label: "Swiggy",
+    color: "text-white border-orange-500",
+    logo: "S",
+    bgColor: "bg-orange-500",
+  },
 };
 
 const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string }> = {
-  draft: { label: "Pending Accept", color: "bg-yellow-100 text-yellow-700 border-yellow-200" },
-  confirmed: { label: "Confirmed", color: "bg-blue-100 text-blue-700 border-blue-200" },
-  preparing: { label: "Preparing", color: "bg-orange-100 text-orange-700 border-orange-200" },
-  ready: { label: "Ready", color: "bg-green-100 text-green-700 border-green-200" },
-  served: { label: "Served", color: "bg-teal-100 text-teal-700 border-teal-200" },
-  completed: { label: "Completed", color: "bg-gray-100 text-gray-700 border-gray-200" },
-  cancelled: { label: "Cancelled", color: "bg-red-100 text-red-700 border-red-200" },
+  draft: {
+    label: "Pending Accept",
+    color: "bg-yellow-100 text-yellow-700 border-yellow-200",
+  },
+  confirmed: {
+    label: "Confirmed",
+    color: "bg-blue-100 text-blue-700 border-blue-200",
+  },
+  preparing: {
+    label: "Preparing",
+    color: "bg-orange-100 text-orange-700 border-orange-200",
+  },
+  ready: {
+    label: "Ready",
+    color: "bg-green-100 text-green-700 border-green-200",
+  },
+  served: {
+    label: "Served",
+    color: "bg-teal-100 text-teal-700 border-teal-200",
+  },
+  completed: {
+    label: "Completed",
+    color: "bg-gray-100 text-gray-700 border-gray-200",
+  },
+  cancelled: {
+    label: "Cancelled",
+    color: "bg-red-100 text-red-700 border-red-200",
+  },
 };
 
 function SourceBadge({ source }: { source: OrderSource }) {
   const config = SOURCE_CONFIG[source];
   if (config.logo) {
     return (
-      <Badge variant="outline" className={cn("gap-1 text-[10px] font-bold", config.color, config.bgColor)}>
+      <Badge
+        variant="outline"
+        className={cn(
+          "gap-1 text-[10px] font-bold",
+          config.color,
+          config.bgColor
+        )}
+      >
         <span className="text-xs font-black">{config.logo}</span>
         {config.label}
       </Badge>
@@ -257,6 +257,20 @@ function SourceBadge({ source }: { source: OrderSource }) {
 // Page
 // ---------------------------------------------------------------------------
 export default function OrdersPage() {
+  const { tenantUser, loading: authLoading } = useTenantUser();
+  const { activeBranchId } = useBranchStore();
+
+  const {
+    data: rawOrders = [],
+    isLoading: ordersLoading,
+  } = useOrders(
+    tenantUser?.tenant_id ?? null,
+    tenantUser?.branch_id || activeBranchId
+  );
+
+  const orders = transformOrders(rawOrders);
+  const isLoading = authLoading || ordersLoading;
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [channelFilter, setChannelFilter] = useState<string>("all");
@@ -264,23 +278,26 @@ export default function OrdersPage() {
   const [accepting, setAccepting] = useState(false);
   const [rejecting, setRejecting] = useState(false);
 
-  const filteredOrders = MOCK_ORDERS.filter((order) => {
+  const filteredOrders = orders.filter((order) => {
     const matchesSearch =
       order.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
-      (order.customerName?.toLowerCase().includes(search.toLowerCase()) ?? false);
+      (order.customerName?.toLowerCase().includes(search.toLowerCase()) ??
+        false);
     const matchesStatus = statusFilter === "all" || order.status === statusFilter;
     const matchesChannel =
       channelFilter === "all" ||
-      (channelFilter === "online" && (order.source === "zomato" || order.source === "swiggy")) ||
+      (channelFilter === "online" &&
+        (order.source === "zomato" || order.source === "swiggy")) ||
       order.source === channelFilter;
     return matchesSearch && matchesStatus && matchesChannel;
   });
 
-  const onlineCount = MOCK_ORDERS.filter(
+  const onlineCount = orders.filter(
     (o) => o.source === "zomato" || o.source === "swiggy"
   ).length;
-  const pendingAcceptCount = MOCK_ORDERS.filter(
-    (o) => o.status === "draft" && (o.source === "zomato" || o.source === "swiggy")
+  const pendingAcceptCount = orders.filter(
+    (o) =>
+      o.status === "draft" && (o.source === "zomato" || o.source === "swiggy")
   ).length;
 
   async function handleAcceptOrder(orderId: string) {
@@ -299,7 +316,11 @@ export default function OrdersPage() {
     await fetch("/api/integrations/accept-reject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ order_id: orderId, action: "reject", rejection_reason: reason }),
+      body: JSON.stringify({
+        order_id: orderId,
+        action: "reject",
+        rejection_reason: reason,
+      }),
     });
     setRejecting(false);
     setSelectedOrder(null);
@@ -324,9 +345,7 @@ export default function OrdersPage() {
       {/* Channel filter tabs */}
       <Tabs value={channelFilter} onValueChange={setChannelFilter}>
         <TabsList>
-          <TabsTrigger value="all">
-            All ({MOCK_ORDERS.length})
-          </TabsTrigger>
+          <TabsTrigger value="all">All ({orders.length})</TabsTrigger>
           <TabsTrigger value="dine_in">
             <Utensils className="mr-1 h-3.5 w-3.5" />
             Dine-in
@@ -386,95 +405,125 @@ export default function OrdersPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Order #</TableHead>
-                <TableHead>Channel</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Items</TableHead>
-                <TableHead>Total</TableHead>
-                <TableHead>Commission</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Time</TableHead>
-                <TableHead className="w-12" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredOrders.map((order) => (
-                <TableRow
-                  key={order.id}
-                  className={cn(
-                    order.status === "draft" && "bg-yellow-50/50 dark:bg-yellow-950/10"
-                  )}
-                >
-                  <TableCell className="font-mono text-sm font-medium">
-                    {order.orderNumber}
-                    {order.aggregatorOrderId && (
-                      <div className="text-[10px] text-muted-foreground">
-                        {order.aggregatorOrderId}
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <SourceBadge source={order.source} />
-                  </TableCell>
-                  <TableCell>
-                    {order.customerName || "-"}
-                    {order.table && (
-                      <div className="text-xs text-muted-foreground">{order.table}</div>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {order.items.length} items
-                  </TableCell>
-                  <TableCell className="font-medium">{formatINR(order.total)}</TableCell>
-                  <TableCell>
-                    {order.commissionAmount ? (
-                      <span className="text-xs text-red-500">
-                        -{formatINR(order.commissionAmount)} ({order.commissionPct}%)
-                      </span>
-                    ) : (
-                      "-"
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={cn("text-[10px]", STATUS_CONFIG[order.status].color)}
-                    >
-                      {STATUS_CONFIG[order.status].label}
-                    </Badge>
-                    {order.autoAccepted && (
-                      <div className="text-[9px] text-muted-foreground mt-0.5">Auto-accepted</div>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {new Date(order.createdAt).toLocaleTimeString("en-IN", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setSelectedOrder(order)}
-                    >
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {filteredOrders.length === 0 && (
+          {isLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <span className="ml-3 text-muted-foreground">
+                Loading orders...
+              </span>
+            </div>
+          ) : orders.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <ShoppingBag className="h-12 w-12 text-muted-foreground/40" />
+              <p className="mt-4 text-lg font-medium text-muted-foreground">
+                No orders yet
+              </p>
+              <p className="text-sm text-muted-foreground/70">
+                Orders from all channels will appear here as they come in.
+              </p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={9} className="py-12 text-center text-muted-foreground">
-                    No orders found
-                  </TableCell>
+                  <TableHead>Order #</TableHead>
+                  <TableHead>Channel</TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>Total</TableHead>
+                  <TableHead>Commission</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Time</TableHead>
+                  <TableHead className="w-12" />
                 </TableRow>
-              )}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filteredOrders.map((order) => (
+                  <TableRow
+                    key={order.id}
+                    className={cn(
+                      order.status === "draft" &&
+                        "bg-yellow-50/50 dark:bg-yellow-950/10"
+                    )}
+                  >
+                    <TableCell className="font-mono text-sm font-medium">
+                      {order.orderNumber}
+                      {order.aggregatorOrderId && (
+                        <div className="text-[10px] text-muted-foreground">
+                          {order.aggregatorOrderId}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <SourceBadge source={order.source} />
+                    </TableCell>
+                    <TableCell>
+                      {order.customerName || "-"}
+                      {order.table && (
+                        <div className="text-xs text-muted-foreground">
+                          {order.table}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {order.items.length} items
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      {formatINR(order.total)}
+                    </TableCell>
+                    <TableCell>
+                      {order.commissionAmount ? (
+                        <span className="text-xs text-red-500">
+                          -{formatINR(order.commissionAmount)} (
+                          {order.commissionPct}%)
+                        </span>
+                      ) : (
+                        "-"
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-[10px]",
+                          STATUS_CONFIG[order.status].color
+                        )}
+                      >
+                        {STATUS_CONFIG[order.status].label}
+                      </Badge>
+                      {order.autoAccepted && (
+                        <div className="text-[9px] text-muted-foreground mt-0.5">
+                          Auto-accepted
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {formatRelativeTime(order.createdAt)}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setSelectedOrder(order)}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {filteredOrders.length === 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={9}
+                      className="py-12 text-center text-muted-foreground"
+                    >
+                      No orders found
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
@@ -494,18 +543,24 @@ export default function OrdersPage() {
 
             <div className="space-y-4 py-2">
               {/* Customer & Delivery Info */}
-              {(selectedOrder.source === "zomato" || selectedOrder.source === "swiggy") && (
+              {(selectedOrder.source === "zomato" ||
+                selectedOrder.source === "swiggy") && (
                 <div className="rounded-lg border bg-muted/50 p-3 space-y-2">
                   <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                     Platform Details
                   </p>
                   {selectedOrder.aggregatorOrderId && (
                     <div className="text-sm">
-                      Platform Order: <code className="bg-muted px-1 rounded">{selectedOrder.aggregatorOrderId}</code>
+                      Platform Order:{" "}
+                      <code className="bg-muted px-1 rounded">
+                        {selectedOrder.aggregatorOrderId}
+                      </code>
                     </div>
                   )}
                   {selectedOrder.customerName && (
-                    <div className="text-sm">Customer: {selectedOrder.customerName}</div>
+                    <div className="text-sm">
+                      Customer: {selectedOrder.customerName}
+                    </div>
                   )}
                   {selectedOrder.deliveryPartnerName && (
                     <div className="flex items-center gap-2 text-sm">
@@ -525,15 +580,19 @@ export default function OrdersPage() {
                     <div className="flex items-center gap-2 text-sm">
                       <Timer className="h-3.5 w-3.5" />
                       Pickup ETA:{" "}
-                      {new Date(selectedOrder.pickupEta).toLocaleTimeString("en-IN", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      {new Date(selectedOrder.pickupEta).toLocaleTimeString(
+                        "en-IN",
+                        {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        }
+                      )}
                     </div>
                   )}
                   {selectedOrder.commissionPct !== undefined && (
                     <div className="text-sm text-red-500">
-                      Commission: {selectedOrder.commissionPct}% = -{formatINR(selectedOrder.commissionAmount || 0)}
+                      Commission: {selectedOrder.commissionPct}% = -
+                      {formatINR(selectedOrder.commissionAmount || 0)}
                     </div>
                   )}
                 </div>
@@ -545,7 +604,10 @@ export default function OrdersPage() {
                   Items
                 </p>
                 {selectedOrder.items.map((item, i) => (
-                  <div key={i} className="flex items-center justify-between text-sm">
+                  <div
+                    key={i}
+                    className="flex items-center justify-between text-sm"
+                  >
                     <span>
                       {item.quantity}x {item.name}
                     </span>
@@ -559,7 +621,11 @@ export default function OrdersPage() {
                 {selectedOrder.commissionAmount ? (
                   <div className="flex items-center justify-between text-sm text-green-600">
                     <span>Net (after commission)</span>
-                    <span>{formatINR(selectedOrder.total - selectedOrder.commissionAmount)}</span>
+                    <span>
+                      {formatINR(
+                        selectedOrder.total - selectedOrder.commissionAmount
+                      )}
+                    </span>
                   </div>
                 ) : null}
               </div>
@@ -567,13 +633,16 @@ export default function OrdersPage() {
 
             {/* Accept/Reject buttons for pending online orders */}
             {selectedOrder.status === "draft" &&
-              (selectedOrder.source === "zomato" || selectedOrder.source === "swiggy") && (
+              (selectedOrder.source === "zomato" ||
+                selectedOrder.source === "swiggy") && (
                 <DialogFooter className="flex gap-2 sm:justify-between">
                   <Button
                     variant="destructive"
                     size="sm"
                     disabled={rejecting}
-                    onClick={() => handleRejectOrder(selectedOrder.id, "restaurant_busy")}
+                    onClick={() =>
+                      handleRejectOrder(selectedOrder.id, "restaurant_busy")
+                    }
                   >
                     {rejecting ? (
                       <Loader2 className="mr-1 h-4 w-4 animate-spin" />

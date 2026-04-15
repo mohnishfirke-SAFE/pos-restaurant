@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import type { UserRole, JWTClaims } from "@/types";
@@ -15,11 +15,11 @@ interface TenantUser {
 export function useTenantUser(): { tenantUser: TenantUser | null; loading: boolean } {
   const [tenantUser, setTenantUser] = useState<TenantUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         if (!cancelled) {
@@ -43,7 +43,7 @@ export function useTenantUser(): { tenantUser: TenantUser | null; loading: boole
     return () => {
       cancelled = true;
     };
-  }, [supabase]);
+  }, []);
 
   return { tenantUser, loading };
 }
@@ -51,9 +51,11 @@ export function useTenantUser(): { tenantUser: TenantUser | null; loading: boole
 export function useUser() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
+  const subscriptionRef = useRef<ReturnType<typeof Object> | null>(null);
 
   useEffect(() => {
+    const supabase = createClient();
+
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
@@ -69,18 +71,22 @@ export function useUser() {
       }
     );
 
-    return () => subscription.unsubscribe();
-  }, [supabase]);
+    subscriptionRef.current = subscription;
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   return { user, loading };
 }
 
 export function useJWTClaims(): JWTClaims | null {
   const [claims, setClaims] = useState<JWTClaims | null>(null);
-  const supabase = createClient();
 
   useEffect(() => {
     const getClaims = async () => {
+      const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token) {
         try {
@@ -97,7 +103,7 @@ export function useJWTClaims(): JWTClaims | null {
     };
 
     getClaims();
-  }, [supabase]);
+  }, []);
 
   return claims;
 }

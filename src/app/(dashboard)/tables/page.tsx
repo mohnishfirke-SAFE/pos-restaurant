@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { formatINR } from "@/lib/utils/currency";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,8 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -29,7 +28,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Plus, Users, Clock, ShoppingCart } from "lucide-react";
+import { Plus, Users, Clock, ShoppingCart, Loader2 } from "lucide-react";
+import { useTenantUser } from "@/lib/auth/hooks";
+import { useBranchStore } from "@/stores/branch-store";
+import { useTables, useCreateTable, useUpdateTableStatus } from "@/hooks/use-tables";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,101 +42,14 @@ type TableShape = "square" | "round" | "rectangle";
 
 interface TableData {
   id: string;
-  number: string;
+  table_number: string;
   capacity: number;
   floor: string;
-  shape: TableShape;
+  shape: string;
   status: TableStatus;
-  // Occupied info
-  currentOrderTotal?: number;
-  occupiedSince?: string;
-  // Reserved info
-  reservationName?: string;
-  reservationTime?: string;
+  current_order_id: string | null;
+  orders?: { id: string; total: number; created_at: string } | null;
 }
-
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const FLOORS = ["Ground Floor", "Terrace"];
-
-const MOCK_TABLES: TableData[] = [
-  {
-    id: "1",
-    number: "T-1",
-    capacity: 2,
-    floor: "Ground Floor",
-    shape: "square",
-    status: "available",
-  },
-  {
-    id: "2",
-    number: "T-2",
-    capacity: 4,
-    floor: "Ground Floor",
-    shape: "square",
-    status: "occupied",
-    currentOrderTotal: 1180,
-    occupiedSince: "2026-04-06T12:30:00",
-  },
-  {
-    id: "3",
-    number: "T-3",
-    capacity: 6,
-    floor: "Ground Floor",
-    shape: "rectangle",
-    status: "reserved",
-    reservationName: "Anita Desai",
-    reservationTime: "7:00 PM",
-  },
-  {
-    id: "4",
-    number: "T-4",
-    capacity: 4,
-    floor: "Ground Floor",
-    shape: "round",
-    status: "occupied",
-    currentOrderTotal: 850,
-    occupiedSince: "2026-04-06T13:15:00",
-  },
-  {
-    id: "5",
-    number: "T-5",
-    capacity: 2,
-    floor: "Ground Floor",
-    shape: "square",
-    status: "cleaning",
-  },
-  {
-    id: "6",
-    number: "T-6",
-    capacity: 8,
-    floor: "Terrace",
-    shape: "rectangle",
-    status: "available",
-  },
-  {
-    id: "7",
-    number: "T-7",
-    capacity: 4,
-    floor: "Terrace",
-    shape: "round",
-    status: "occupied",
-    currentOrderTotal: 620,
-    occupiedSince: "2026-04-06T12:50:00",
-  },
-  {
-    id: "8",
-    number: "T-8",
-    capacity: 2,
-    floor: "Terrace",
-    shape: "square",
-    status: "reserved",
-    reservationName: "Vikram Singh",
-    reservationTime: "8:30 PM",
-  },
-];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -184,10 +99,34 @@ function getElapsedTime(since: string): string {
 // ---------------------------------------------------------------------------
 
 export default function TablesPage() {
-  const [tables, setTables] = useState<TableData[]>(MOCK_TABLES);
+  const router = useRouter();
+  const { tenantUser, loading: tenantLoading } = useTenantUser();
+  const { activeBranchId } = useBranchStore();
+
+  const branchId = tenantUser?.branch_id || activeBranchId;
+  const tenantId = tenantUser?.tenant_id ?? null;
+
+  const { data: tables = [], isLoading } = useTables(tenantId, branchId);
+  const createTable = useCreateTable();
+  const updateTableStatus = useUpdateTableStatus();
+
   const [selectedTable, setSelectedTable] = useState<TableData | null>(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [activeFloor, setActiveFloor] = useState(FLOORS[0]);
+
+  // Derive floors dynamically from table data
+  const floors = useMemo(
+    () => (tables.length ? [...new Set(tables.map((t) => t.floor))] : ["Ground Floor"]),
+    [tables]
+  );
+
+  const [activeFloor, setActiveFloor] = useState(floors[0]);
+
+  // Reset active floor when floors change and current is no longer valid
+  useMemo(() => {
+    if (!floors.includes(activeFloor)) {
+      setActiveFloor(floors[0]);
+    }
+  }, [floors, activeFloor]);
 
   const floorTables = tables.filter((t) => t.floor === activeFloor);
 
@@ -200,16 +139,52 @@ export default function TablesPage() {
   };
 
   function handleAddTable(formData: FormData) {
-    const newTable: TableData = {
-      id: crypto.randomUUID(),
-      number: formData.get("number") as string,
-      capacity: parseInt(formData.get("capacity") as string, 10),
-      floor: formData.get("floor") as string,
-      shape: (formData.get("shape") as TableShape) || "square",
-      status: "available",
-    };
-    setTables((prev) => [...prev, newTable]);
-    setAddDialogOpen(false);
+    if (!tenantId || !branchId) return;
+
+    const table_number = formData.get("number") as string;
+    const capacity = parseInt(formData.get("capacity") as string, 10);
+    const floor = formData.get("floor") as string;
+    const shape = (formData.get("shape") as string) || "square";
+
+    createTable.mutate(
+      {
+        tenant_id: tenantId,
+        branch_id: branchId,
+        table_number,
+        capacity,
+        floor,
+        shape,
+        status: "available",
+        is_active: true,
+      },
+      {
+        onSuccess: () => {
+          setAddDialogOpen(false);
+        },
+      }
+    );
+  }
+
+  // Loading state
+  if (isLoading || tenantLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="mr-2 h-6 w-6 animate-spin" />
+        <span className="text-lg text-muted-foreground">Loading tables...</span>
+      </div>
+    );
+  }
+
+  // No branch selected
+  if (!branchId) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <p className="text-lg text-muted-foreground">No branch selected</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Please select a branch to view tables.
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -271,7 +246,7 @@ export default function TablesPage() {
                       <SelectValue placeholder="Select floor" />
                     </SelectTrigger>
                     <SelectContent>
-                      {FLOORS.map((f) => (
+                      {floors.map((f) => (
                         <SelectItem key={f} value={f}>
                           {f}
                         </SelectItem>
@@ -294,7 +269,12 @@ export default function TablesPage() {
                 </div>
               </div>
               <DialogFooter>
-                <Button type="submit">Add Table</Button>
+                <Button type="submit" disabled={createTable.isPending}>
+                  {createTable.isPending && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  Add Table
+                </Button>
               </DialogFooter>
             </form>
           </DialogContent>
@@ -338,30 +318,33 @@ export default function TablesPage() {
       {/* Floor tabs + Grid */}
       <Tabs value={activeFloor} onValueChange={setActiveFloor}>
         <TabsList>
-          {FLOORS.map((f) => (
+          {floors.map((f) => (
             <TabsTrigger key={f} value={f}>
               {f}
             </TabsTrigger>
           ))}
         </TabsList>
 
-        {FLOORS.map((floor) => (
+        {floors.map((floor) => (
           <TabsContent key={floor} value={floor}>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {tables
                 .filter((t) => t.floor === floor)
                 .map((table) => {
-                  const style = STATUS_STYLES[table.status];
+                  const status = table.status as TableStatus;
+                  const style = STATUS_STYLES[status];
+                  const currentOrderTotal = table.orders?.total;
+                  const occupiedSince = table.orders?.created_at;
                   return (
                     <Card
                       key={table.id}
                       className={`cursor-pointer border-2 transition-shadow hover:shadow-md ${style.border} ${style.bg}`}
-                      onClick={() => setSelectedTable(table)}
+                      onClick={() => setSelectedTable(table as unknown as TableData)}
                     >
                       <CardContent className="p-4">
                         <div className="flex items-center justify-between">
                           <span className="text-lg font-bold">
-                            {table.number}
+                            {table.table_number}
                           </span>
                           <Badge
                             variant="outline"
@@ -385,16 +368,16 @@ export default function TablesPage() {
                         {/* Occupied details */}
                         {table.status === "occupied" && (
                           <div className="mt-3 space-y-1">
-                            {table.currentOrderTotal !== undefined && (
+                            {currentOrderTotal !== undefined && currentOrderTotal !== null && (
                               <div className="flex items-center gap-1 text-sm font-medium">
                                 <ShoppingCart className="h-3.5 w-3.5" />
-                                {formatINR(table.currentOrderTotal)}
+                                {formatINR(currentOrderTotal)}
                               </div>
                             )}
-                            {table.occupiedSince && (
+                            {occupiedSince && (
                               <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                 <Clock className="h-3 w-3" />
-                                {getElapsedTime(table.occupiedSince)} elapsed
+                                {getElapsedTime(occupiedSince)} elapsed
                               </div>
                             )}
                           </div>
@@ -403,16 +386,9 @@ export default function TablesPage() {
                         {/* Reserved details */}
                         {table.status === "reserved" && (
                           <div className="mt-3 space-y-1">
-                            {table.reservationName && (
-                              <p className="text-sm font-medium">
-                                {table.reservationName}
-                              </p>
-                            )}
-                            {table.reservationTime && (
-                              <p className="text-xs text-muted-foreground">
-                                at {table.reservationTime}
-                              </p>
-                            )}
+                            <p className="text-sm text-muted-foreground italic">
+                              Reserved
+                            </p>
                           </div>
                         )}
                       </CardContent>
@@ -433,11 +409,14 @@ export default function TablesPage() {
       >
         <DialogContent>
           {selectedTable && (() => {
-            const style = STATUS_STYLES[selectedTable.status];
+            const status = selectedTable.status as TableStatus;
+            const style = STATUS_STYLES[status];
+            const currentOrderTotal = selectedTable.orders?.total;
+            const occupiedSince = selectedTable.orders?.created_at;
             return (
               <>
                 <DialogHeader>
-                  <DialogTitle>Table {selectedTable.number}</DialogTitle>
+                  <DialogTitle>Table {selectedTable.table_number}</DialogTitle>
                   <DialogDescription>
                     {selectedTable.capacity} seats &middot;{" "}
                     {selectedTable.floor} &middot;{" "}
@@ -460,18 +439,25 @@ export default function TablesPage() {
                   {selectedTable.status === "occupied" && (
                     <div className="space-y-2 rounded-md border p-3">
                       <h4 className="text-sm font-medium">Current Order</h4>
-                      {selectedTable.currentOrderTotal !== undefined && (
+                      {currentOrderTotal !== undefined && currentOrderTotal !== null && (
                         <p className="text-lg font-bold">
-                          {formatINR(selectedTable.currentOrderTotal)}
+                          {formatINR(currentOrderTotal)}
                         </p>
                       )}
-                      {selectedTable.occupiedSince && (
+                      {occupiedSince && (
                         <p className="text-sm text-muted-foreground">
                           Seated for{" "}
-                          {getElapsedTime(selectedTable.occupiedSince)}
+                          {getElapsedTime(occupiedSince)}
                         </p>
                       )}
-                      <Button className="mt-2 w-full" variant="outline">
+                      <Button
+                        className="mt-2 w-full"
+                        variant="outline"
+                        onClick={() => {
+                          setSelectedTable(null);
+                          router.push("/orders");
+                        }}
+                      >
                         View Order
                       </Button>
                     </div>
@@ -480,22 +466,35 @@ export default function TablesPage() {
                   {selectedTable.status === "reserved" && (
                     <div className="space-y-2 rounded-md border p-3">
                       <h4 className="text-sm font-medium">Reservation</h4>
-                      {selectedTable.reservationName && (
-                        <p className="text-sm">
-                          {selectedTable.reservationName}
-                        </p>
-                      )}
-                      {selectedTable.reservationTime && (
-                        <p className="text-sm text-muted-foreground">
-                          Reserved for {selectedTable.reservationTime}
-                        </p>
-                      )}
-                      <Button className="mt-2 w-full">Seat Guest</Button>
+                      <p className="text-sm text-muted-foreground">
+                        This table is currently reserved.
+                      </p>
+                      <Button
+                        className="mt-2 w-full"
+                        onClick={() => {
+                          updateTableStatus.mutate({
+                            id: selectedTable.id,
+                            status: "occupied",
+                          });
+                          setSelectedTable(null);
+                        }}
+                      >
+                        Seat Guest
+                      </Button>
                     </div>
                   )}
 
                   {selectedTable.status === "available" && (
-                    <Button className="w-full">Start New Order</Button>
+                    <Button
+                      className="w-full"
+                      onClick={() => {
+                        const id = selectedTable.id;
+                        setSelectedTable(null);
+                        router.push(`/pos?tableId=${encodeURIComponent(id)}&orderType=dine_in`);
+                      }}
+                    >
+                      Start New Order
+                    </Button>
                   )}
 
                   {selectedTable.status === "cleaning" && (
@@ -507,13 +506,10 @@ export default function TablesPage() {
                         className="w-full"
                         variant="outline"
                         onClick={() => {
-                          setTables((prev) =>
-                            prev.map((t) =>
-                              t.id === selectedTable.id
-                                ? { ...t, status: "available" as TableStatus }
-                                : t
-                            )
-                          );
+                          updateTableStatus.mutate({
+                            id: selectedTable.id,
+                            status: "available",
+                          });
                           setSelectedTable(null);
                         }}
                       >

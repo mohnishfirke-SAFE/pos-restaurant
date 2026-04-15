@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Search,
   Plus,
@@ -43,22 +44,9 @@ import { usePOSStore, type CartItem } from "@/stores/pos-store";
 import { useMenuItems, useMenuCategories } from "@/hooks/use-menu";
 import { formatINR } from "@/lib/utils/currency";
 import { cn } from "@/lib/utils";
-
-// ---------------------------------------------------------------------------
-// Mock tables (until a real tables hook is available)
-// ---------------------------------------------------------------------------
-const MOCK_TABLES = [
-  { id: "t1", name: "Table 1" },
-  { id: "t2", name: "Table 2" },
-  { id: "t3", name: "Table 3" },
-  { id: "t4", name: "Table 4" },
-  { id: "t5", name: "Table 5" },
-  { id: "t6", name: "Table 6" },
-  { id: "t7", name: "Table 7" },
-  { id: "t8", name: "Table 8" },
-  { id: "t9", name: "Table 9" },
-  { id: "t10", name: "Table 10" },
-];
+import { useTenantUser } from "@/lib/auth/hooks";
+import { useBranchStore } from "@/stores/branch-store";
+import { createClient } from "@/lib/supabase/client";
 
 // ---------------------------------------------------------------------------
 // Payment Dialog
@@ -180,6 +168,35 @@ function PaymentDialog({
 // POS Terminal Page
 // ---------------------------------------------------------------------------
 export default function POSTerminalPage() {
+  return (
+    <Suspense fallback={<div className="flex h-[calc(100vh-4rem)] items-center justify-center text-muted-foreground">Loading POS...</div>}>
+      <POSTerminalInner />
+    </Suspense>
+  );
+}
+
+function POSTerminalInner() {
+  // Auth & branch
+  const { tenantUser } = useTenantUser();
+  const { activeBranchId } = useBranchStore();
+
+  // Tables
+  const [tables, setTables] = useState<{ id: string; table_number: string }[]>([]);
+  useEffect(() => {
+    if (!tenantUser) return;
+    const branchId = tenantUser.branch_id || activeBranchId;
+    if (!branchId) return;
+    const supabase = createClient();
+    supabase
+      .from("restaurant_tables")
+      .select("id, table_number")
+      .eq("tenant_id", tenantUser.tenant_id)
+      .eq("branch_id", branchId)
+      .eq("is_active", true)
+      .order("table_number")
+      .then(({ data }) => { if (data) setTables(data); });
+  }, [tenantUser, activeBranchId]);
+
   // Store
   const {
     orderType,
@@ -207,6 +224,19 @@ export default function POSTerminalPage() {
   // Local state
   const [searchQuery, setSearchQuery] = useState("");
   const [paymentOpen, setPaymentOpen] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  // Read URL params for pre-selected table (from Tables page)
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const urlTableId = searchParams.get("tableId");
+    const urlOrderType = searchParams.get("orderType");
+    if (urlTableId) setTableId(urlTableId);
+    if (urlOrderType === "dine_in" || urlOrderType === "takeaway" || urlOrderType === "delivery") {
+      setOrderType(urlOrderType);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // Derived values
   const subtotal = getSubtotal();
@@ -239,14 +269,91 @@ export default function POSTerminalPage() {
     });
   }
 
-  function handleSendToKitchen() {
-    // TODO: integrate with KOT creation via Supabase
-    alert("Order sent to kitchen!");
+  async function handleSendToKitchen() {
+    if (!tenantUser) {
+      alert("Session expired. Please log in again.");
+      return;
+    }
+    const branchId = tenantUser.branch_id || activeBranchId;
+    if (!branchId) {
+      alert("No branch assigned. Contact your manager.");
+      return;
+    }
+    if (cartItems.length === 0) return;
+
+    try {
+      setSending(true);
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: tenantUser.tenant_id,
+          branch_id: branchId,
+          order_type: orderType,
+          table_id: tableId,
+          subtotal,
+          discount_amount: discountAmount,
+          tax_amount: tax.total,
+          cgst_amount: tax.cgst,
+          sgst_amount: tax.sgst,
+          total,
+          items: cartItems.map((item) => ({
+            menu_item_id: item.menuItemId,
+            quantity: item.quantity,
+            unit_price: item.price,
+            modifiers: item.modifiers,
+            notes: item.notes,
+          })),
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to create order");
+      }
+
+      clearCart();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to send order to kitchen");
+    } finally {
+      setSending(false);
+    }
   }
 
-  function handleHold() {
-    // TODO: persist held orders
-    alert("Order placed on hold.");
+  async function handleHold() {
+    if (!tenantUser || cartItems.length === 0) return;
+    const branchId = tenantUser.branch_id || activeBranchId;
+    if (!branchId) return;
+
+    try {
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: tenantUser.tenant_id,
+          branch_id: branchId,
+          order_type: orderType,
+          table_id: tableId,
+          subtotal,
+          discount_amount: discountAmount,
+          tax_amount: tax.total,
+          cgst_amount: tax.cgst,
+          sgst_amount: tax.sgst,
+          total,
+          status: "draft",
+          items: cartItems.map((item) => ({
+            menu_item_id: item.menuItemId,
+            quantity: item.quantity,
+            unit_price: item.price,
+            modifiers: item.modifiers,
+            notes: item.notes,
+          })),
+        }),
+      });
+      if (res.ok) clearCart();
+    } catch {
+      // Silent fail — held order not critical
+    }
   }
 
   function handlePaymentComplete() {
@@ -380,12 +487,12 @@ export default function POSTerminalPage() {
               onValueChange={(v) => setTableId(v || null)}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select a table" />
+                <SelectValue placeholder={tables.length === 0 ? "No tables found" : "Select a table"} />
               </SelectTrigger>
               <SelectContent>
-                {MOCK_TABLES.map((table) => (
+                {tables.map((table) => (
                   <SelectItem key={table.id} value={table.id}>
-                    {table.name}
+                    Table {table.table_number}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -498,7 +605,7 @@ export default function POSTerminalPage() {
               variant="outline"
               className="gap-1.5"
               onClick={handleSendToKitchen}
-              disabled={cartItems.length === 0}
+              disabled={cartItems.length === 0 || sending}
             >
               <Send className="h-3.5 w-3.5" />
               Kitchen

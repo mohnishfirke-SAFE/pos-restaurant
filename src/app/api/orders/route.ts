@@ -1,13 +1,22 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const { searchParams } = new URL(request.url);
+  const tenantId = searchParams.get("tenant_id");
+  const branchId = searchParams.get("branch_id");
+
+  let query = supabase
     .from("orders")
     .select("*, order_items(*)")
     .order("created_at", { ascending: false })
     .limit(50);
+
+  if (tenantId) query = query.eq("tenant_id", tenantId);
+  if (branchId) query = query.eq("branch_id", branchId);
+
+  const { data, error } = await query;
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data);
