@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -35,168 +35,25 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, CalendarDays, List } from "lucide-react";
+import { Plus, CalendarDays, List, Loader2 } from "lucide-react";
+import { useTenantUser } from "@/lib/auth/hooks";
+import { useBranchStore } from "@/stores/branch-store";
+import {
+  useShifts,
+  useCreateShift,
+  useDeleteShift,
+  useEmployeesForSelect,
+} from "@/hooks/use-shifts";
 
-type ShiftStatus = "scheduled" | "clocked_in" | "clocked_out" | "absent";
-
-interface Shift {
-  id: string;
-  employeeId: string;
-  employeeName: string;
-  date: string;
-  startTime: string;
-  endTime: string;
-  status: ShiftStatus;
-  hoursWorked: number | null;
-}
-
-const employees = [
-  { id: "emp-1", name: "Arjun Mehta" },
-  { id: "emp-2", name: "Kavita Nair" },
-  { id: "emp-3", name: "Ravi Shankar" },
-  { id: "emp-4", name: "Deepa Joshi" },
-];
-
-const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const weekDates = [
-  "2026-04-06",
-  "2026-04-07",
-  "2026-04-08",
-  "2026-04-09",
-  "2026-04-10",
-  "2026-04-11",
-  "2026-04-12",
-];
-
-const initialShifts: Shift[] = [
-  {
-    id: "s1",
-    employeeId: "emp-1",
-    employeeName: "Arjun Mehta",
-    date: "2026-04-06",
-    startTime: "09:00",
-    endTime: "17:00",
-    status: "clocked_in",
-    hoursWorked: null,
-  },
-  {
-    id: "s2",
-    employeeId: "emp-2",
-    employeeName: "Kavita Nair",
-    date: "2026-04-06",
-    startTime: "10:00",
-    endTime: "18:00",
-    status: "clocked_in",
-    hoursWorked: null,
-  },
-  {
-    id: "s3",
-    employeeId: "emp-3",
-    employeeName: "Ravi Shankar",
-    date: "2026-04-06",
-    startTime: "14:00",
-    endTime: "22:00",
-    status: "scheduled",
-    hoursWorked: null,
-  },
-  {
-    id: "s4",
-    employeeId: "emp-4",
-    employeeName: "Deepa Joshi",
-    date: "2026-04-06",
-    startTime: "09:00",
-    endTime: "17:00",
-    status: "absent",
-    hoursWorked: null,
-  },
-  {
-    id: "s5",
-    employeeId: "emp-1",
-    employeeName: "Arjun Mehta",
-    date: "2026-04-07",
-    startTime: "09:00",
-    endTime: "17:00",
-    status: "scheduled",
-    hoursWorked: null,
-  },
-  {
-    id: "s6",
-    employeeId: "emp-2",
-    employeeName: "Kavita Nair",
-    date: "2026-04-07",
-    startTime: "10:00",
-    endTime: "18:00",
-    status: "scheduled",
-    hoursWorked: null,
-  },
-  {
-    id: "s7",
-    employeeId: "emp-3",
-    employeeName: "Ravi Shankar",
-    date: "2026-04-07",
-    startTime: "14:00",
-    endTime: "22:00",
-    status: "scheduled",
-    hoursWorked: null,
-  },
-  {
-    id: "s8",
-    employeeId: "emp-1",
-    employeeName: "Arjun Mehta",
-    date: "2026-04-08",
-    startTime: "09:00",
-    endTime: "17:00",
-    status: "scheduled",
-    hoursWorked: null,
-  },
-  {
-    id: "s9",
-    employeeId: "emp-2",
-    employeeName: "Kavita Nair",
-    date: "2026-04-09",
-    startTime: "10:00",
-    endTime: "18:00",
-    status: "scheduled",
-    hoursWorked: null,
-  },
-  {
-    id: "s10",
-    employeeId: "emp-3",
-    employeeName: "Ravi Shankar",
-    date: "2026-04-10",
-    startTime: "14:00",
-    endTime: "22:00",
-    status: "scheduled",
-    hoursWorked: null,
-  },
-  {
-    id: "s11",
-    employeeId: "emp-4",
-    employeeName: "Deepa Joshi",
-    date: "2026-04-11",
-    startTime: "09:00",
-    endTime: "17:00",
-    status: "scheduled",
-    hoursWorked: null,
-  },
-  {
-    id: "s12",
-    employeeId: "emp-1",
-    employeeName: "Arjun Mehta",
-    date: "2026-04-05",
-    startTime: "09:00",
-    endTime: "17:00",
-    status: "clocked_out",
-    hoursWorked: 8,
-  },
-];
+type ShiftStatus = "scheduled" | "clocked_in" | "clocked_out" | "completed" | "cancelled";
 
 function getStatusBadge(status: ShiftStatus) {
   const config: Record<ShiftStatus, { label: string; className: string }> = {
     scheduled: { label: "Scheduled", className: "bg-blue-600 hover:bg-blue-600/80 text-white" },
     clocked_in: { label: "Clocked In", className: "bg-green-600 hover:bg-green-600/80 text-white" },
     clocked_out: { label: "Clocked Out", className: "bg-gray-500 hover:bg-gray-500/80 text-white" },
-    absent: { label: "Absent", className: "bg-red-600 hover:bg-red-600/80 text-white" },
+    completed: { label: "Completed", className: "bg-emerald-700 hover:bg-emerald-700/80 text-white" },
+    cancelled: { label: "Cancelled", className: "bg-red-600 hover:bg-red-600/80 text-white" },
   };
   const { label, className } = config[status];
   return <Badge className={className}>{label}</Badge>;
@@ -208,33 +65,93 @@ function calculateHours(start: string, end: string): number {
   return (eh * 60 + em - (sh * 60 + sm)) / 60;
 }
 
+function getWeekStart(date: Date): string {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d.setDate(diff));
+  return monday.toISOString().slice(0, 10);
+}
+
 export default function ShiftsPage() {
-  const [shifts, setShifts] = useState<Shift[]>(initialShifts);
+  const { tenantUser, loading: authLoading } = useTenantUser();
+  const { activeBranchId } = useBranchStore();
+
+  const tenantId = tenantUser?.tenant_id;
+  const branchId = activeBranchId ?? tenantUser?.branch_id ?? undefined;
+
+  const weekStart = useMemo(() => getWeekStart(new Date()), []);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [view, setView] = useState<"calendar" | "list">("calendar");
 
-  function handleAddShift(formData: FormData) {
-    const employeeId = formData.get("employee") as string;
-    const employee = employees.find((e) => e.id === employeeId);
-    if (!employee) return;
+  // Form state
+  const [formEmployee, setFormEmployee] = useState("");
+  const [formDate, setFormDate] = useState("");
+  const [formStartTime, setFormStartTime] = useState("");
+  const [formEndTime, setFormEndTime] = useState("");
 
-    const newShift: Shift = {
-      id: crypto.randomUUID(),
-      employeeId,
-      employeeName: employee.name,
-      date: formData.get("date") as string,
-      startTime: formData.get("startTime") as string,
-      endTime: formData.get("endTime") as string,
-      status: "scheduled",
-      hoursWorked: null,
-    };
-    setShifts((prev) => [...prev, newShift]);
-    setDialogOpen(false);
+  const { data: shifts, isLoading: shiftsLoading } = useShifts(tenantId, branchId, weekStart);
+  const { data: employees, isLoading: employeesLoading } = useEmployeesForSelect(tenantId);
+  const createShift = useCreateShift();
+  const deleteShift = useDeleteShift();
+
+  const weekDates = useMemo(() => {
+    const start = new Date(weekStart);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(start);
+      d.setDate(d.getDate() + i);
+      return d.toISOString().slice(0, 10);
+    });
+  }, [weekStart]);
+
+  const weekDayLabels = useMemo(() => {
+    return weekDates.map((d) => {
+      const date = new Date(d + "T00:00:00");
+      return date.toLocaleDateString("en-US", { weekday: "short" });
+    });
+  }, [weekDates]);
+
+  const isLoading = authLoading || shiftsLoading || employeesLoading;
+
+  function handleAddShift(e: React.FormEvent) {
+    e.preventDefault();
+    if (!tenantId || !branchId || !formEmployee || !formDate || !formStartTime || !formEndTime) return;
+
+    createShift.mutate(
+      {
+        tenant_id: tenantId,
+        branch_id: branchId,
+        user_id: formEmployee,
+        shift_date: formDate,
+        start_time: formStartTime,
+        end_time: formEndTime,
+        status: "scheduled",
+        break_minutes: null,
+        notes: null,
+      },
+      {
+        onSuccess: () => {
+          setDialogOpen(false);
+          setFormEmployee("");
+          setFormDate("");
+          setFormStartTime("");
+          setFormEndTime("");
+        },
+      }
+    );
   }
 
-  function getShiftsForCell(date: string, employeeId: string) {
-    return shifts.filter(
-      (s) => s.date === date && s.employeeId === employeeId
+  function getShiftsForCell(date: string, userId: string) {
+    return (shifts ?? []).filter(
+      (s) => s.shift_date === date && s.user_id === userId
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
     );
   }
 
@@ -255,12 +172,7 @@ export default function ShiftsPage() {
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleAddShift(new FormData(e.currentTarget));
-            }}
-          >
+          <form onSubmit={handleAddShift}>
             <DialogHeader>
               <DialogTitle>Add Shift</DialogTitle>
               <DialogDescription>
@@ -270,14 +182,14 @@ export default function ShiftsPage() {
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
                 <Label htmlFor="employee">Employee</Label>
-                <Select name="employee" required>
+                <Select value={formEmployee} onValueChange={setFormEmployee} required>
                   <SelectTrigger>
                     <SelectValue placeholder="Select employee" />
                   </SelectTrigger>
                   <SelectContent>
-                    {employees.map((emp) => (
-                      <SelectItem key={emp.id} value={emp.id}>
-                        {emp.name}
+                    {(employees ?? []).map((emp) => (
+                      <SelectItem key={emp.id} value={emp.user_id}>
+                        {emp.display_name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -285,21 +197,42 @@ export default function ShiftsPage() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="date">Date</Label>
-                <Input id="date" name="date" type="date" required />
+                <Input
+                  id="date"
+                  value={formDate}
+                  onChange={(e) => setFormDate(e.target.value)}
+                  type="date"
+                  required
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="startTime">Start Time</Label>
-                  <Input id="startTime" name="startTime" type="time" required />
+                  <Input
+                    id="startTime"
+                    value={formStartTime}
+                    onChange={(e) => setFormStartTime(e.target.value)}
+                    type="time"
+                    required
+                  />
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="endTime">End Time</Label>
-                  <Input id="endTime" name="endTime" type="time" required />
+                  <Input
+                    id="endTime"
+                    value={formEndTime}
+                    onChange={(e) => setFormEndTime(e.target.value)}
+                    type="time"
+                    required
+                  />
                 </div>
               </div>
             </div>
             <DialogFooter>
-              <Button type="submit">Add Shift</Button>
+              <Button type="submit" disabled={createShift.isPending}>
+                {createShift.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Add Shift
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -323,7 +256,9 @@ export default function ShiftsPage() {
         <TabsContent value="calendar">
           <Card>
             <CardHeader>
-              <CardTitle>Weekly Schedule (Apr 6 - Apr 12, 2026)</CardTitle>
+              <CardTitle>
+                Weekly Schedule ({weekDates[0]} to {weekDates[6]})
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="overflow-auto">
@@ -331,7 +266,7 @@ export default function ShiftsPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="min-w-[120px]">Employee</TableHead>
-                      {weekDays.map((day, i) => (
+                      {weekDayLabels.map((day, i) => (
                         <TableHead key={day} className="min-w-[130px] text-center">
                           <div>{day}</div>
                           <div className="text-xs font-normal text-muted-foreground">
@@ -342,13 +277,13 @@ export default function ShiftsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {employees.map((emp) => (
+                    {(employees ?? []).map((emp) => (
                       <TableRow key={emp.id}>
                         <TableCell className="font-medium">
-                          {emp.name}
+                          {emp.display_name}
                         </TableCell>
                         {weekDates.map((date) => {
-                          const cellShifts = getShiftsForCell(date, emp.id);
+                          const cellShifts = getShiftsForCell(date, emp.user_id);
                           return (
                             <TableCell key={date} className="text-center">
                               {cellShifts.length > 0 ? (
@@ -359,9 +294,9 @@ export default function ShiftsPage() {
                                       className="rounded border p-1.5 text-xs space-y-1"
                                     >
                                       <div className="font-medium">
-                                        {s.startTime} - {s.endTime}
+                                        {s.start_time} - {s.end_time}
                                       </div>
-                                      {getStatusBadge(s.status)}
+                                      {getStatusBadge(s.status as ShiftStatus)}
                                     </div>
                                   ))}
                                 </div>
@@ -397,28 +332,43 @@ export default function ShiftsPage() {
                     <TableHead>End Time</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Hours Worked</TableHead>
+                    <TableHead className="w-12" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[...shifts]
-                    .sort((a, b) => b.date.localeCompare(a.date))
+                  {[...(shifts ?? [])]
+                    .sort((a, b) => b.shift_date.localeCompare(a.shift_date))
                     .map((shift) => (
                       <TableRow key={shift.id}>
-                        <TableCell>{shift.date}</TableCell>
+                        <TableCell>{shift.shift_date}</TableCell>
                         <TableCell className="font-medium">
-                          {shift.employeeName}
+                          {shift.tenant_users?.display_name ?? "Unknown"}
                         </TableCell>
-                        <TableCell>{shift.startTime}</TableCell>
-                        <TableCell>{shift.endTime}</TableCell>
-                        <TableCell>{getStatusBadge(shift.status)}</TableCell>
+                        <TableCell>{shift.start_time}</TableCell>
+                        <TableCell>{shift.end_time}</TableCell>
+                        <TableCell>{getStatusBadge(shift.status as ShiftStatus)}</TableCell>
                         <TableCell>
-                          {shift.hoursWorked !== null
-                            ? `${shift.hoursWorked}h`
+                          {shift.clock_in_at && shift.clock_out_at
+                            ? `${(
+                                (new Date(shift.clock_out_at).getTime() -
+                                  new Date(shift.clock_in_at).getTime()) /
+                                3600000
+                              ).toFixed(1)}h`
                             : shift.status === "clocked_in"
                             ? "In progress"
                             : shift.status === "scheduled"
-                            ? `${calculateHours(shift.startTime, shift.endTime)}h (planned)`
+                            ? `${calculateHours(shift.start_time, shift.end_time)}h (planned)`
                             : "-"}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => deleteShift.mutate(shift.id)}
+                            disabled={deleteShift.isPending}
+                          >
+                            <span className="text-red-500 text-xs">x</span>
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}

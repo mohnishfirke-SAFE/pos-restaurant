@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useBranchStore } from "@/stores/branch-store";
+import { useTenantUser } from "@/lib/auth/hooks";
 import {
   ChefHat,
   Clock,
@@ -82,124 +83,64 @@ const PLATFORM_CONFIG: Record<
 };
 
 // ---------------------------------------------------------------------------
-// Mock Data (fallback when DB is empty)
+// Helpers to map DB rows → KOT interface
 // ---------------------------------------------------------------------------
-const MOCK_KOTS: KOT[] = [
-  {
-    id: "kot-1",
-    orderId: "ord-1",
-    orderNumber: "#1042",
-    tableNumber: "T3",
-    orderType: "dine_in",
-    status: "pending",
-    createdAt: new Date(Date.now() - 2 * 60_000),
-    items: [
-      { id: "i1", name: "Butter Chicken", quantity: 2, modifiers: ["Extra Spicy"], notes: "" },
-      { id: "i2", name: "Garlic Naan", quantity: 4, modifiers: [], notes: "" },
-      { id: "i3", name: "Dal Makhani", quantity: 1, modifiers: [], notes: "Less salt" },
-    ],
-    aggregatorPlatform: null,
+interface DbKot {
+  id: string;
+  kot_number: string;
+  status: KotStatus;
+  created_at: string;
+  accepted_at: string | null;
+  ready_at: string | null;
+  orders: {
+    id: string;
+    order_number: string;
+    order_type: OrderType;
+    table_id: string | null;
+    aggregator_platform: string | null;
+    aggregator_order_id: string | null;
+    restaurant_tables: { table_number: string } | null;
+    order_items: {
+      id: string;
+      menu_item_id: string;
+      quantity: number;
+      unit_price: number;
+      notes: string | null;
+      modifiers: unknown;
+      menu_items: { name: string } | null;
+    }[];
+  } | null;
+}
+
+function mapDbKotToKOT(kot: DbKot): KOT {
+  const order = kot.orders;
+  const items = (order?.order_items ?? []).map((oi) => ({
+    id: oi.id,
+    name: oi.menu_items?.name ?? "Unknown",
+    quantity: oi.quantity,
+    modifiers: Array.isArray(oi.modifiers)
+      ? oi.modifiers.map((m: Record<string, unknown>) => (typeof m === "string" ? m : (m.name as string)) ?? "")
+      : [],
+    notes: oi.notes ?? "",
+  }));
+
+  return {
+    id: kot.id,
+    orderId: order?.id ?? "",
+    orderNumber: order?.order_number ?? kot.kot_number,
+    tableNumber: order?.restaurant_tables?.table_number ?? null,
+    orderType: order?.order_type ?? "dine_in",
+    status: kot.status,
+    createdAt: new Date(kot.created_at),
+    items,
+    aggregatorPlatform: order?.aggregator_platform ?? null,
     customerName: null,
     deliveryPartnerName: null,
     deliveryPartnerPhone: null,
     pickupEta: null,
-    aggregatorOrderId: null,
-  },
-  {
-    id: "kot-2",
-    orderId: "ord-2",
-    orderNumber: "#1043",
-    tableNumber: null,
-    orderType: "aggregator",
-    status: "pending",
-    createdAt: new Date(Date.now() - 5 * 60_000),
-    items: [
-      { id: "i4", name: "Chicken Biryani", quantity: 1, modifiers: ["No Raita"], notes: "" },
-      { id: "i5", name: "Paneer Tikka", quantity: 1, modifiers: [], notes: "" },
-    ],
-    aggregatorPlatform: "zomato",
-    customerName: "Rahul Kumar",
-    deliveryPartnerName: "Amit S.",
-    deliveryPartnerPhone: "+91-9876543210",
-    pickupEta: new Date(Date.now() + 8 * 60_000),
-    aggregatorOrderId: "ZMT-98765",
-  },
-  {
-    id: "kot-3",
-    orderId: "ord-3",
-    orderNumber: "#1040",
-    tableNumber: "T7",
-    orderType: "dine_in",
-    status: "in_progress",
-    createdAt: new Date(Date.now() - 12 * 60_000),
-    items: [
-      { id: "i6", name: "Tandoori Platter", quantity: 1, modifiers: [], notes: "" },
-      { id: "i7", name: "Hyderabadi Biryani", quantity: 2, modifiers: ["Extra Salan"], notes: "" },
-    ],
-    aggregatorPlatform: null,
-    customerName: null,
-    deliveryPartnerName: null,
-    deliveryPartnerPhone: null,
-    pickupEta: null,
-    aggregatorOrderId: null,
-  },
-  {
-    id: "kot-4",
-    orderId: "ord-4",
-    orderNumber: "#1041",
-    tableNumber: null,
-    orderType: "aggregator",
-    status: "in_progress",
-    createdAt: new Date(Date.now() - 8 * 60_000),
-    items: [
-      { id: "i8", name: "Veg Thali", quantity: 3, modifiers: [], notes: "No onion, no garlic" },
-    ],
-    aggregatorPlatform: "swiggy",
-    customerName: "Priya M.",
-    deliveryPartnerName: "Raju D.",
-    deliveryPartnerPhone: "+91-8765432109",
-    pickupEta: new Date(Date.now() + 5 * 60_000),
-    aggregatorOrderId: "SWG-45678",
-  },
-  {
-    id: "kot-5",
-    orderId: "ord-5",
-    orderNumber: "#1038",
-    tableNumber: "T1",
-    orderType: "dine_in",
-    status: "ready",
-    createdAt: new Date(Date.now() - 20 * 60_000),
-    items: [
-      { id: "i9", name: "Masala Dosa", quantity: 2, modifiers: [], notes: "" },
-      { id: "i10", name: "Filter Coffee", quantity: 2, modifiers: [], notes: "" },
-    ],
-    aggregatorPlatform: null,
-    customerName: null,
-    deliveryPartnerName: null,
-    deliveryPartnerPhone: null,
-    pickupEta: null,
-    aggregatorOrderId: null,
-  },
-  {
-    id: "kot-6",
-    orderId: "ord-6",
-    orderNumber: "#1039",
-    tableNumber: null,
-    orderType: "aggregator",
-    status: "ready",
-    createdAt: new Date(Date.now() - 15 * 60_000),
-    items: [
-      { id: "i11", name: "Chole Bhature", quantity: 1, modifiers: [], notes: "" },
-      { id: "i12", name: "Lassi", quantity: 1, modifiers: ["Sweet"], notes: "" },
-    ],
-    aggregatorPlatform: "zomato",
-    customerName: "Sanjay P.",
-    deliveryPartnerName: "Vinod K.",
-    deliveryPartnerPhone: "+91-7654321098",
-    pickupEta: new Date(Date.now() + 2 * 60_000),
-    aggregatorOrderId: "ZMT-87654",
-  },
-];
+    aggregatorOrderId: order?.aggregator_order_id ?? null,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Order Type Config
@@ -531,11 +472,85 @@ function KDSColumn({
 // KDS Page
 // ---------------------------------------------------------------------------
 export default function KitchenDisplayPage() {
-  const [kots, setKots] = useState<KOT[]>(MOCK_KOTS);
+  const [kots, setKots] = useState<KOT[]>([]);
+  const [loading, setLoading] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [filter, setFilter] = useState<"all" | "dine_in" | "swiggy" | "zomato">("all");
   const { activeBranchId } = useBranchStore();
+  const { tenantUser } = useTenantUser();
   const supabase = createClient();
+
+  // Fetch KOTs from database + realtime subscription
+  useEffect(() => {
+    if (!tenantUser) return;
+    const branchId = tenantUser.branch_id || activeBranchId;
+    if (!branchId) {
+      setLoading(false);
+      return;
+    }
+
+    const fetchKOTs = async () => {
+      const { data, error } = await supabase
+        .from("kots")
+        .select(`
+          id,
+          kot_number,
+          status,
+          created_at,
+          accepted_at,
+          ready_at,
+          orders (
+            id,
+            order_number,
+            order_type,
+            table_id,
+            aggregator_platform,
+            aggregator_order_id,
+            restaurant_tables ( table_number ),
+            order_items (
+              id,
+              menu_item_id,
+              quantity,
+              unit_price,
+              notes,
+              modifiers,
+              menu_items ( name )
+            )
+          )
+        `)
+        .eq("tenant_id", tenantUser.tenant_id)
+        .eq("branch_id", branchId)
+        .in("status", ["pending", "in_progress", "ready"])
+        .order("created_at", { ascending: false });
+
+      if (!error && data) {
+        setKots((data as unknown as DbKot[]).map(mapDbKotToKOT));
+      }
+      setLoading(false);
+    };
+
+    fetchKOTs();
+
+    // Realtime: refetch whenever kots or orders change
+    const channel = supabase
+      .channel("kds-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "kots", filter: `branch_id=eq.${branchId}` },
+        () => { fetchKOTs(); }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "orders", filter: `branch_id=eq.${branchId}` },
+        () => { fetchKOTs(); }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantUser, activeBranchId]);
 
   // Sync KOT status back to platform when kitchen updates
   const syncStatusToPlatform = useCallback(
@@ -695,6 +710,14 @@ export default function KitchenDisplayPage() {
       </div>
 
       {/* Kanban columns */}
+      {loading ? (
+        <div className="flex flex-1 items-center justify-center">
+          <div className="flex flex-col items-center gap-3 text-zinc-500">
+            <ChefHat className="h-10 w-10 animate-pulse" />
+            <p className="text-sm">Loading kitchen orders...</p>
+          </div>
+        </div>
+      ) : (
       <div className="flex flex-1 divide-x divide-zinc-700 overflow-x-auto">
         <KDSColumn
           title="New"
@@ -715,6 +738,7 @@ export default function KitchenDisplayPage() {
           accentColor="bg-green-500"
         />
       </div>
+      )}
     </div>
   );
 }

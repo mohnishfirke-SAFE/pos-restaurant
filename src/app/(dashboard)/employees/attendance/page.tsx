@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -25,63 +25,28 @@ import {
   UserCheck,
   UserX,
   Users,
+  Loader2,
 } from "lucide-react";
+import { useTenantUser } from "@/lib/auth/hooks";
+import { useBranchStore } from "@/stores/branch-store";
+import {
+  useTodayAttendance,
+  useClockIn,
+  useClockOut,
+} from "@/hooks/use-attendance";
 
 type AttendanceStatus = "present" | "absent" | "late" | "on_leave";
 
-interface AttendanceRecord {
-  id: string;
-  employeeId: string;
-  employeeName: string;
+interface EmployeeRecord {
+  userId: string;
+  displayName: string;
   role: string;
   status: AttendanceStatus;
   clockIn: string | null;
   clockOut: string | null;
+  shiftId: string | null;
   hoursWorked: number | null;
 }
-
-const initialRecords: AttendanceRecord[] = [
-  {
-    id: "att-1",
-    employeeId: "emp-1",
-    employeeName: "Arjun Mehta",
-    role: "Admin",
-    status: "present",
-    clockIn: "09:02",
-    clockOut: null,
-    hoursWorked: null,
-  },
-  {
-    id: "att-2",
-    employeeId: "emp-2",
-    employeeName: "Kavita Nair",
-    role: "Manager",
-    status: "present",
-    clockIn: "08:15",
-    clockOut: null,
-    hoursWorked: null,
-  },
-  {
-    id: "att-3",
-    employeeId: "emp-3",
-    employeeName: "Ravi Shankar",
-    role: "Chef",
-    status: "late",
-    clockIn: "14:45",
-    clockOut: null,
-    hoursWorked: null,
-  },
-  {
-    id: "att-4",
-    employeeId: "emp-4",
-    employeeName: "Deepa Joshi",
-    role: "Cashier",
-    status: "absent",
-    clockIn: null,
-    clockOut: null,
-    hoursWorked: null,
-  },
-];
 
 function getStatusBadge(status: AttendanceStatus) {
   const config: Record<AttendanceStatus, { label: string; className: string }> = {
@@ -94,45 +59,148 @@ function getStatusBadge(status: AttendanceStatus) {
   return <Badge className={className}>{label}</Badge>;
 }
 
-function getCurrentTime(): string {
-  const now = new Date();
-  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-}
-
-function calculateHoursBetween(start: string, end: string): number {
-  const [sh, sm] = start.split(":").map(Number);
-  const [eh, em] = end.split(":").map(Number);
-  const diff = (eh * 60 + em - (sh * 60 + sm)) / 60;
-  return Math.round(diff * 100) / 100;
+function formatTime(isoString: string | null): string | null {
+  if (!isoString) return null;
+  const d = new Date(isoString);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 export default function AttendancePage() {
-  const [records, setRecords] = useState<AttendanceRecord[]>(initialRecords);
+  const { tenantUser, loading: authLoading } = useTenantUser();
+  const { activeBranchId } = useBranchStore();
+
+  const tenantId = tenantUser?.tenant_id;
+  const branchId = activeBranchId ?? tenantUser?.branch_id ?? undefined;
+
+  const { data, isLoading: dataLoading } = useTodayAttendance(tenantId, branchId);
+  const clockIn = useClockIn();
+  const clockOut = useClockOut();
+
+  const isLoading = authLoading || dataLoading;
+
+  // Build per-employee records from attendance logs + shifts
+  const records: EmployeeRecord[] = useMemo(() => {
+    if (!data) return [];
+
+    const attendance = data.attendance;
+    const shifts = data.shifts;
+
+    // Collect unique user IDs from shifts
+    const userMap = new Map<
+      string,
+      {
+        displayName: string;
+        role: string;
+        clockIn: string | null;
+        clockOut: string | null;
+        shiftId: string | null;
+      }
+    >();
+
+    // Seed from shifts
+    for (const shift of shifts) {
+      if (!userMap.has(shift.user_id)) {
+        userMap.set(shift.user_id, {
+          displayName: "",
+          role: "",
+          clockIn: shift.clock_in_at,
+          clockOut: shift.clock_out_at,
+          shiftId: shift.id,
+        });
+      }
+    }
+
+    // Merge attendance log info (display_name, role)
+    for (const log of attendance) {
+      const existing = userMap.get(log.user_id);
+      const displayName = log.tenant_users?.display_name ?? "";
+      const role = log.tenant_users?.role ?? "";
+
+      if (existing) {
+        if (!existing.displayName) existing.displayName = displayName;
+        if (!existing.role) existing.role = role;
+        if (log.action === "clock_in" && !existing.clockIn) {
+          existing.clockIn = log.timestamp;
+        }
+        if (log.action === "clock_out" && !existing.clockOut) {
+          existing.clockOut = log.timestamp;
+        }
+      } else {
+        userMap.set(log.user_id, {
+          displayName,
+          role,
+          clockIn: log.action === "clock_in" ? log.timestamp : null,
+          clockOut: log.action === "clock_out" ? log.timestamp : null,
+          shiftId: null,
+        });
+      }
+    }
+
+    return Array.from(userMap.entries()).map(([userId, info]) => {
+      const clockInTime = formatTime(info.clockIn);
+      const clockOutTime = formatTime(info.clockOut);
+
+      let status: AttendanceStatus = "absent";
+      if (info.clockIn && info.clockOut) {
+        status = "present";
+      } else if (info.clockIn && !info.clockOut) {
+        status = "present";
+      }
+
+      let hoursWorked: number | null = null;
+      if (info.clockIn && info.clockOut) {
+        hoursWorked =
+          Math.round(
+            ((new Date(info.clockOut).getTime() -
+              new Date(info.clockIn).getTime()) /
+              3600000) *
+              100
+          ) / 100;
+      }
+
+      return {
+        userId,
+        displayName: info.displayName || "Unknown",
+        role: info.role || "-",
+        status,
+        clockIn: clockInTime,
+        clockOut: clockOutTime,
+        shiftId: info.shiftId,
+        hoursWorked,
+      };
+    });
+  }, [data]);
 
   const presentCount = records.filter(
     (r) => r.status === "present" || r.status === "late"
   ).length;
   const absentCount = records.filter((r) => r.status === "absent").length;
 
-  function handleClockIn(id: string) {
-    const time = getCurrentTime();
-    setRecords((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? { ...r, clockIn: time, status: "present" as AttendanceStatus }
-          : r
-      )
-    );
+  function handleClockIn(record: EmployeeRecord) {
+    if (!tenantId || !branchId || !record.shiftId) return;
+    clockIn.mutate({
+      tenantId,
+      branchId,
+      userId: record.userId,
+      shiftId: record.shiftId,
+    });
   }
 
-  function handleClockOut(id: string) {
-    const time = getCurrentTime();
-    setRecords((prev) =>
-      prev.map((r) => {
-        if (r.id !== id || !r.clockIn) return r;
-        const hours = calculateHoursBetween(r.clockIn, time);
-        return { ...r, clockOut: time, hoursWorked: hours };
-      })
+  function handleClockOut(record: EmployeeRecord) {
+    if (!tenantId || !branchId || !record.shiftId) return;
+    clockOut.mutate({
+      tenantId,
+      branchId,
+      userId: record.userId,
+      shiftId: record.shiftId,
+    });
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
     );
   }
 
@@ -216,9 +284,9 @@ export default function AttendancePage() {
             </TableHeader>
             <TableBody>
               {records.map((record) => (
-                <TableRow key={record.id}>
+                <TableRow key={record.userId}>
                   <TableCell className="font-medium">
-                    {record.employeeName}
+                    {record.displayName}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {record.role}
@@ -253,13 +321,18 @@ export default function AttendancePage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-2">
-                      {!record.clockIn && (
+                      {!record.clockIn && record.shiftId && (
                         <Button
                           size="sm"
                           className="bg-green-600 hover:bg-green-700"
-                          onClick={() => handleClockIn(record.id)}
+                          onClick={() => handleClockIn(record)}
+                          disabled={clockIn.isPending}
                         >
-                          <LogIn className="mr-1 h-4 w-4" />
+                          {clockIn.isPending ? (
+                            <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                          ) : (
+                            <LogIn className="mr-1 h-4 w-4" />
+                          )}
                           Clock In
                         </Button>
                       )}
@@ -267,9 +340,14 @@ export default function AttendancePage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => handleClockOut(record.id)}
+                          onClick={() => handleClockOut(record)}
+                          disabled={clockOut.isPending}
                         >
-                          <LogOut className="mr-1 h-4 w-4" />
+                          {clockOut.isPending ? (
+                            <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                          ) : (
+                            <LogOut className="mr-1 h-4 w-4" />
+                          )}
                           Clock Out
                         </Button>
                       )}
@@ -282,6 +360,13 @@ export default function AttendancePage() {
                   </TableCell>
                 </TableRow>
               ))}
+              {records.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                    No shifts scheduled for today
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </CardContent>
