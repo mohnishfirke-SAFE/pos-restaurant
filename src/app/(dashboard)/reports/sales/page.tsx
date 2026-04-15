@@ -2,20 +2,50 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { formatINR } from "@/lib/utils/currency";
-import { Download } from "lucide-react";
-
-const mockDailySales = [
-  { date: "2026-04-06", orders: 89, revenue: 125750, avgOrder: 1413 },
-  { date: "2026-04-05", orders: 78, revenue: 110500, avgOrder: 1417 },
-  { date: "2026-04-04", orders: 92, revenue: 131800, avgOrder: 1433 },
-  { date: "2026-04-03", orders: 65, revenue: 89750, avgOrder: 1381 },
-  { date: "2026-04-02", orders: 71, revenue: 98400, avgOrder: 1386 },
-  { date: "2026-04-01", orders: 85, revenue: 119000, avgOrder: 1400 },
-];
+import { downloadCSV } from "@/lib/utils/csv-export";
+import { useTenantUser } from "@/lib/auth/hooks";
+import { useBranchStore } from "@/stores/branch-store";
+import { useDailySales } from "@/hooks/use-reports";
+import { Download, Loader2 } from "lucide-react";
 
 export default function SalesReportPage() {
+  const { tenantUser, loading: authLoading } = useTenantUser();
+  const activeBranchId = useBranchStore((s) => s.activeBranchId);
+
+  const tenantId = tenantUser?.tenant_id ?? null;
+  const branchId = activeBranchId ?? tenantUser?.branch_id ?? null;
+
+  const { data: dailySales, loading } = useDailySales(tenantId, branchId, 30);
+
+  const handleExport = () => {
+    downloadCSV(
+      dailySales.map((d) => ({
+        Date: d.date,
+        Orders: d.orders,
+        Revenue: d.revenue,
+        AvgOrder: d.avgOrder,
+      })),
+      "daily-sales-report"
+    );
+  };
+
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -23,31 +53,46 @@ export default function SalesReportPage() {
           <h1 className="text-2xl font-bold tracking-tight">Sales Report</h1>
           <p className="text-muted-foreground">Detailed daily sales breakdown</p>
         </div>
-        <Button variant="outline"><Download className="mr-2 h-4 w-4" />Export CSV</Button>
+        <Button variant="outline" onClick={handleExport} disabled={loading || dailySales.length === 0}>
+          <Download className="mr-2 h-4 w-4" />
+          Export CSV
+        </Button>
       </div>
       <Card>
-        <CardHeader><CardTitle>Daily Sales</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Daily Sales (Last 30 Days)</CardTitle>
+        </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Orders</TableHead>
-                <TableHead>Revenue</TableHead>
-                <TableHead>Avg Order</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {mockDailySales.map((d) => (
-                <TableRow key={d.date}>
-                  <TableCell className="font-medium">{d.date}</TableCell>
-                  <TableCell>{d.orders}</TableCell>
-                  <TableCell>{formatINR(d.revenue)}</TableCell>
-                  <TableCell>{formatINR(d.avgOrder)}</TableCell>
+          {loading ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : dailySales.length === 0 ? (
+            <div className="text-center py-10 text-muted-foreground text-sm">
+              No sales data available for this period
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Orders</TableHead>
+                  <TableHead>Revenue</TableHead>
+                  <TableHead>Avg Order</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {dailySales.map((d) => (
+                  <TableRow key={d.date}>
+                    <TableCell className="font-medium">{d.date}</TableCell>
+                    <TableCell>{d.orders}</TableCell>
+                    <TableCell>{formatINR(d.revenue)}</TableCell>
+                    <TableCell>{formatINR(d.avgOrder)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>

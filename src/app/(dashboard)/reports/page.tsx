@@ -1,46 +1,117 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatINR } from "@/lib/utils/currency";
-import { BarChart3, TrendingUp, TrendingDown, Download, IndianRupee, ShoppingCart, Users, Clock, Truck } from "lucide-react";
-
-const mockStats = {
-  revenue: 125750,
-  orders: 89,
-  avgOrderValue: 1413,
-  customers: 62,
-  revenueChange: 12.5,
-  ordersChange: 8.3,
-};
-
-const mockTopItems = [
-  { name: "Butter Chicken", orders: 32, revenue: 12800 },
-  { name: "Paneer Tikka", orders: 28, revenue: 8400 },
-  { name: "Biryani", orders: 25, revenue: 7500 },
-  { name: "Dal Makhani", orders: 22, revenue: 5500 },
-  { name: "Naan", orders: 45, revenue: 2250 },
-];
-
-const mockHourlyData = [
-  { hour: "11AM", orders: 5 }, { hour: "12PM", orders: 15 }, { hour: "1PM", orders: 22 },
-  { hour: "2PM", orders: 12 }, { hour: "3PM", orders: 4 }, { hour: "4PM", orders: 3 },
-  { hour: "5PM", orders: 2 }, { hour: "6PM", orders: 6 }, { hour: "7PM", orders: 18 },
-  { hour: "8PM", orders: 25 }, { hour: "9PM", orders: 20 }, { hour: "10PM", orders: 8 },
-];
+import { downloadCSV } from "@/lib/utils/csv-export";
+import { useTenantUser } from "@/lib/auth/hooks";
+import { useBranchStore } from "@/stores/branch-store";
+import {
+  useReportStats,
+  useTopItems,
+  useHourlyData,
+  useChannelReport,
+  useStaffReport,
+} from "@/hooks/use-reports";
+import {
+  BarChart3,
+  TrendingUp,
+  Download,
+  IndianRupee,
+  ShoppingCart,
+  Users,
+  Clock,
+  Truck,
+  Loader2,
+} from "lucide-react";
 
 export default function ReportsPage() {
   const [period, setPeriod] = useState("today");
+  const { tenantUser, loading: authLoading } = useTenantUser();
+  const activeBranchId = useBranchStore((s) => s.activeBranchId);
+
+  const tenantId = tenantUser?.tenant_id ?? null;
+  const branchId = activeBranchId ?? tenantUser?.branch_id ?? null;
+
+  const { data: stats, loading: statsLoading } = useReportStats(
+    tenantId,
+    branchId,
+    period
+  );
+  const { data: topItems, loading: topLoading } = useTopItems(
+    tenantId,
+    branchId,
+    period
+  );
+  const { data: hourlyData, loading: hourlyLoading } = useHourlyData(
+    tenantId,
+    branchId
+  );
+  const { data: channelData, loading: channelLoading } = useChannelReport(
+    tenantId,
+    branchId,
+    period
+  );
+  const { data: staffData, loading: staffLoading } = useStaffReport(
+    tenantId,
+    branchId
+  );
+
+  const isLoading =
+    authLoading || statsLoading || topLoading || hourlyLoading || channelLoading || staffLoading;
+
+  const maxHourlyOrders = useMemo(
+    () => Math.max(...hourlyData.map((d) => d.orders), 1),
+    [hourlyData]
+  );
+
+  const channelColors: Record<string, string> = {
+    "Dine-in": "bg-blue-500",
+    Zomato: "bg-red-600",
+    Swiggy: "bg-orange-500",
+    Takeaway: "bg-purple-500",
+    Delivery: "bg-green-500",
+  };
+
+  const channelLogos: Record<string, string> = {
+    Zomato: "Z",
+    Swiggy: "S",
+  };
+
+  const handleExport = () => {
+    const exportData = [
+      {
+        period,
+        revenue: stats.revenue,
+        orders: stats.orderCount,
+        customers: stats.customerCount,
+        avgOrderValue: Math.round(stats.avgOrderValue),
+      },
+    ];
+    downloadCSV(exportData, `report-overview-${period}`);
+  };
+
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Reports & Analytics</h1>
-          <p className="text-muted-foreground">Track your restaurant performance</p>
+          <h1 className="text-2xl font-bold tracking-tight">
+            Reports & Analytics
+          </h1>
+          <p className="text-muted-foreground">
+            Track your restaurant performance
+          </p>
         </div>
         <div className="flex gap-2">
           <Tabs value={period} onValueChange={setPeriod}>
@@ -50,12 +121,14 @@ export default function ReportsPage() {
               <TabsTrigger value="month">This Month</TabsTrigger>
             </TabsList>
           </Tabs>
-          <Button variant="outline" size="sm">
-            <Download className="mr-2 h-4 w-4" />Export
+          <Button variant="outline" size="sm" onClick={handleExport}>
+            <Download className="mr-2 h-4 w-4" />
+            Export
           </Button>
         </div>
       </div>
 
+      {/* Stat Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -63,10 +136,18 @@ export default function ReportsPage() {
             <IndianRupee className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatINR(mockStats.revenue)}</div>
-            <div className="flex items-center text-xs text-green-600">
-              <TrendingUp className="mr-1 h-3 w-3" />+{mockStats.revenueChange}% from yesterday
-            </div>
+            {statsLoading ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <>
+                <div className="text-2xl font-bold">
+                  {formatINR(stats.revenue)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Total for selected period
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -75,10 +156,16 @@ export default function ReportsPage() {
             <ShoppingCart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{mockStats.orders}</div>
-            <div className="flex items-center text-xs text-green-600">
-              <TrendingUp className="mr-1 h-3 w-3" />+{mockStats.ordersChange}%
-            </div>
+            {statsLoading ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <>
+                <div className="text-2xl font-bold">{stats.orderCount}</div>
+                <p className="text-xs text-muted-foreground">
+                  Completed orders
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -87,8 +174,16 @@ export default function ReportsPage() {
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatINR(mockStats.avgOrderValue)}</div>
-            <p className="text-xs text-muted-foreground">Per order average</p>
+            {statsLoading ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <>
+                <div className="text-2xl font-bold">
+                  {formatINR(stats.avgOrderValue)}
+                </div>
+                <p className="text-xs text-muted-foreground">Per order average</p>
+              </>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -97,55 +192,98 @@ export default function ReportsPage() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{mockStats.customers}</div>
-            <p className="text-xs text-muted-foreground">Unique customers</p>
+            {statsLoading ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <>
+                <div className="text-2xl font-bold">
+                  {stats.customerCount}
+                </div>
+                <p className="text-xs text-muted-foreground">Unique customers</p>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
+        {/* Hourly Orders */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Clock className="h-4 w-4" />Hourly Orders
+              <Clock className="h-4 w-4" />
+              Hourly Orders
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex items-end gap-1 h-40">
-              {mockHourlyData.map((d) => (
-                <div key={d.hour} className="flex flex-1 flex-col items-center gap-1">
+            {hourlyLoading ? (
+              <div className="flex items-center justify-center h-40">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : hourlyData.length === 0 ? (
+              <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">
+                No orders today yet
+              </div>
+            ) : (
+              <div className="flex items-end gap-1 h-40">
+                {hourlyData.map((d) => (
                   <div
-                    className="w-full rounded-t bg-primary transition-all"
-                    style={{ height: `${(d.orders / 25) * 100}%`, minHeight: 4 }}
-                  />
-                  <span className="text-[10px] text-muted-foreground">{d.hour}</span>
-                </div>
-              ))}
-            </div>
+                    key={d.hour}
+                    className="flex flex-1 flex-col items-center gap-1"
+                  >
+                    <div
+                      className="w-full rounded-t bg-primary transition-all"
+                      style={{
+                        height: `${(d.orders / maxHourlyOrders) * 100}%`,
+                        minHeight: d.orders > 0 ? 4 : 0,
+                      }}
+                    />
+                    <span className="text-[10px] text-muted-foreground">
+                      {d.hour}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
+        {/* Top Selling Items */}
         <Card>
           <CardHeader>
             <CardTitle>Top Selling Items</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {mockTopItems.map((item, i) => (
-                <div key={item.name} className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-bold">
-                      {i + 1}
-                    </span>
-                    <div>
-                      <p className="text-sm font-medium">{item.name}</p>
-                      <p className="text-xs text-muted-foreground">{item.orders} orders</p>
+            {topLoading ? (
+              <div className="flex items-center justify-center h-40">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : topItems.length === 0 ? (
+              <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">
+                No item data for this period
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {topItems.map((item, i) => (
+                  <div key={item.name} className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-bold">
+                        {i + 1}
+                      </span>
+                      <div>
+                        <p className="text-sm font-medium">{item.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {item.orders} orders
+                        </p>
+                      </div>
                     </div>
+                    <span className="text-sm font-medium">
+                      {formatINR(item.revenue)}
+                    </span>
                   </div>
-                  <span className="text-sm font-medium">{formatINR(item.revenue)}</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -159,102 +297,136 @@ export default function ReportsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              { name: "Dine-in", orders: 52, revenue: 73500, color: "bg-blue-500" },
-              { name: "Zomato", orders: 18, revenue: 27000, color: "bg-red-600", logo: "Z", commission: 6750 },
-              { name: "Swiggy", orders: 12, revenue: 16800, color: "bg-orange-500", logo: "S", commission: 3360 },
-              { name: "Takeaway", orders: 7, revenue: 8450, color: "bg-purple-500" },
-            ].map((ch) => (
-              <div key={ch.name} className="rounded-lg border p-3 space-y-2">
-                <div className="flex items-center gap-2">
-                  {"logo" in ch && ch.logo ? (
-                    <span className={`inline-flex h-6 w-6 items-center justify-center rounded text-xs font-black text-white ${ch.color}`}>
-                      {ch.logo}
-                    </span>
-                  ) : (
-                    <div className={`h-3 w-3 rounded-full ${ch.color}`} />
-                  )}
-                  <span className="text-sm font-medium">{ch.name}</span>
+          {channelLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : channelData.length === 0 ? (
+            <div className="flex items-center justify-center py-10 text-muted-foreground text-sm">
+              No channel data for this period
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {channelData.map((ch) => (
+                <div key={ch.name} className="rounded-lg border p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    {channelLogos[ch.name] ? (
+                      <span
+                        className={`inline-flex h-6 w-6 items-center justify-center rounded text-xs font-black text-white ${channelColors[ch.name] || "bg-gray-500"}`}
+                      >
+                        {channelLogos[ch.name]}
+                      </span>
+                    ) : (
+                      <div
+                        className={`h-3 w-3 rounded-full ${channelColors[ch.name] || "bg-gray-500"}`}
+                      />
+                    )}
+                    <span className="text-sm font-medium">{ch.name}</span>
+                  </div>
+                  <div className="text-xl font-bold">
+                    {formatINR(ch.revenue)}
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>{ch.orders} orders</span>
+                    {ch.commission > 0 ? (
+                      <span className="text-red-500">
+                        -{formatINR(ch.commission)} comm.
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="text-xl font-bold">{formatINR(ch.revenue)}</div>
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{ch.orders} orders</span>
-                  {"commission" in ch && ch.commission ? (
-                    <span className="text-red-500">-{formatINR(ch.commission)} comm.</span>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
           <div className="mt-3 text-right">
-            <a href="/reports/channels" className="text-xs text-primary hover:underline">
-              View detailed channel report →
+            <a
+              href="/reports/channels"
+              className="text-xs text-primary hover:underline"
+            >
+              View detailed channel report &rarr;
             </a>
           </div>
         </CardContent>
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-3">
+        {/* Payment Methods — requires payments table */}
         <Card>
-          <CardHeader><CardTitle>Payment Methods</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Payment Methods</CardTitle>
+          </CardHeader>
           <CardContent>
-            <div className="space-y-2">
-              {[
-                { method: "UPI", pct: 45, color: "bg-blue-500" },
-                { method: "Cash", pct: 30, color: "bg-green-500" },
-                { method: "Card", pct: 20, color: "bg-purple-500" },
-                { method: "Wallet", pct: 5, color: "bg-orange-500" },
-              ].map((p) => (
-                <div key={p.method} className="flex items-center gap-3">
-                  <span className="w-12 text-sm">{p.method}</span>
-                  <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-                    <div className={`h-full rounded-full ${p.color}`} style={{ width: `${p.pct}%` }} />
-                  </div>
-                  <span className="w-10 text-right text-sm text-muted-foreground">{p.pct}%</span>
-                </div>
-              ))}
+            <div className="text-sm text-muted-foreground text-center py-8">
+              Payment breakdown available via detailed sales report
             </div>
           </CardContent>
         </Card>
+
+        {/* Order Types */}
         <Card>
-          <CardHeader><CardTitle>Order Types</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Order Types</CardTitle>
+          </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {[
-                { type: "Dine-in", count: 52, pct: 58 },
-                { type: "Takeaway", count: 25, pct: 28 },
-                { type: "Delivery", count: 12, pct: 14 },
-              ].map((t) => (
-                <div key={t.type} className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">{t.type}</p>
-                    <p className="text-xs text-muted-foreground">{t.count} orders</p>
-                  </div>
-                  <Badge variant="secondary">{t.pct}%</Badge>
-                </div>
-              ))}
-            </div>
+            {channelLoading ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <div className="space-y-3">
+                {channelData.map((ch) => {
+                  const totalOrders = channelData.reduce(
+                    (s, c) => s + c.orders,
+                    0
+                  );
+                  const pct =
+                    totalOrders > 0
+                      ? Math.round((ch.orders / totalOrders) * 100)
+                      : 0;
+                  return (
+                    <div key={ch.name} className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">{ch.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {ch.orders} orders
+                        </p>
+                      </div>
+                      <Badge variant="secondary">{pct}%</Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
+
+        {/* Staff Performance */}
         <Card>
-          <CardHeader><CardTitle>Staff Performance</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Staff Performance</CardTitle>
+          </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {[
-                { name: "Rahul S.", orders: 28, revenue: 39200 },
-                { name: "Priya M.", orders: 22, revenue: 30800 },
-                { name: "Amit K.", orders: 18, revenue: 25200 },
-              ].map((s) => (
-                <div key={s.name} className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">{s.name}</p>
-                    <p className="text-xs text-muted-foreground">{s.orders} orders</p>
+            {staffLoading ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : staffData.length === 0 ? (
+              <div className="text-sm text-muted-foreground text-center py-4">
+                No staff data this month
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {staffData.slice(0, 3).map((s) => (
+                  <div key={s.name} className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">{s.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {s.orders} orders
+                      </p>
+                    </div>
+                    <span className="text-sm font-medium">
+                      {formatINR(s.revenue)}
+                    </span>
                   </div>
-                  <span className="text-sm font-medium">{formatINR(s.revenue)}</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
