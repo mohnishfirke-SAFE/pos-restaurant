@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +45,17 @@ import {
   Users,
   Phone,
   Mail,
+  Loader2,
 } from "lucide-react";
+import { useTenantUser } from "@/lib/auth/hooks";
+import { useBranchStore } from "@/stores/branch-store";
+import {
+  useReservations,
+  useCreateReservation,
+  useUpdateReservation,
+  useTables,
+  type ReservationRow,
+} from "@/hooks/use-reservations";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -58,75 +68,6 @@ type ReservationStatus =
   | "completed"
   | "cancelled"
   | "no_show";
-
-interface Reservation {
-  id: string;
-  guestName: string;
-  phone: string;
-  email?: string;
-  partySize: number;
-  date: string;
-  time: string;
-  duration: number; // minutes
-  table: string | null;
-  status: ReservationStatus;
-  notes?: string;
-}
-
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_RESERVATIONS: Reservation[] = [
-  {
-    id: "1",
-    guestName: "Anita Desai",
-    phone: "+91 98765 43210",
-    email: "anita.desai@email.com",
-    partySize: 4,
-    date: "2026-04-06",
-    time: "19:00",
-    duration: 90,
-    table: "T-3",
-    status: "confirmed",
-    notes: "Anniversary dinner, window seat preferred",
-  },
-  {
-    id: "2",
-    guestName: "Vikram Singh",
-    phone: "+91 87654 32109",
-    partySize: 2,
-    date: "2026-04-06",
-    time: "20:30",
-    duration: 60,
-    table: "T-8",
-    status: "pending",
-  },
-  {
-    id: "3",
-    guestName: "Meera Iyer",
-    phone: "+91 76543 21098",
-    email: "meera@company.com",
-    partySize: 8,
-    date: "2026-04-06",
-    time: "13:00",
-    duration: 120,
-    table: "T-6",
-    status: "seated",
-    notes: "Business lunch, need projector setup",
-  },
-  {
-    id: "4",
-    guestName: "Rajesh Kumar",
-    phone: "+91 65432 10987",
-    partySize: 3,
-    date: "2026-04-05",
-    time: "19:30",
-    duration: 90,
-    table: "T-1",
-    status: "no_show",
-  },
-];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -184,27 +125,44 @@ type ViewMode = "list" | "calendar";
 // ---------------------------------------------------------------------------
 
 export default function ReservationsPage() {
-  const [reservations, setReservations] =
-    useState<Reservation[]>(MOCK_RESERVATIONS);
+  const { tenantUser, loading: authLoading } = useTenantUser();
+  const tenantId = tenantUser?.tenant_id ?? null;
+  const branchId = useBranchStore((s) => s.activeBranchId);
+
+  const { data: reservations, isLoading } = useReservations(
+    tenantId,
+    branchId
+  );
+  const createReservation = useCreateReservation();
+  const updateReservation = useUpdateReservation();
+  const { data: tables } = useTables(tenantId, branchId);
+
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const filtered = reservations.filter((r) => {
+  const todayStr = useMemo(
+    () => new Date().toISOString().split("T")[0],
+    []
+  );
+
+  const displayReservations = reservations ?? [];
+
+  const filtered = displayReservations.filter((r) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return (
-      r.guestName.toLowerCase().includes(q) ||
-      r.phone.includes(q) ||
-      r.table?.toLowerCase().includes(q)
+      r.customer_name.toLowerCase().includes(q) ||
+      r.customer_phone.includes(q) ||
+      (r.restaurant_tables?.table_number ?? "").toLowerCase().includes(q)
     );
   });
 
   // Group reservations by date for calendar view
-  const groupedByDate = filtered.reduce<Record<string, Reservation[]>>(
+  const groupedByDate = filtered.reduce<Record<string, ReservationRow[]>>(
     (acc, r) => {
-      if (!acc[r.date]) acc[r.date] = [];
-      acc[r.date].push(r);
+      if (!acc[r.reservation_date]) acc[r.reservation_date] = [];
+      acc[r.reservation_date].push(r);
       return acc;
     },
     {}
@@ -212,26 +170,41 @@ export default function ReservationsPage() {
   const sortedDates = Object.keys(groupedByDate).sort();
 
   function handleCreateReservation(formData: FormData) {
-    const newReservation: Reservation = {
-      id: crypto.randomUUID(),
-      guestName: formData.get("guestName") as string,
-      phone: formData.get("phone") as string,
-      email: (formData.get("email") as string) || undefined,
-      partySize: parseInt(formData.get("partySize") as string, 10),
-      date: formData.get("date") as string,
-      time: formData.get("time") as string,
-      duration: parseInt(formData.get("duration") as string, 10) || 90,
-      table: null,
-      status: "pending",
-      notes: (formData.get("notes") as string) || undefined,
-    };
-    setReservations((prev) => [...prev, newReservation]);
-    setDialogOpen(false);
+    if (!tenantId || !branchId) return;
+
+    createReservation.mutate(
+      {
+        tenant_id: tenantId,
+        branch_id: branchId,
+        customer_name: (formData.get("guestName") as string) || "",
+        customer_phone: (formData.get("phone") as string) || "",
+        customer_email: (formData.get("email") as string) || null,
+        party_size: parseInt(formData.get("partySize") as string, 10) || 2,
+        reservation_date: (formData.get("date") as string) || todayStr,
+        reservation_time: (formData.get("time") as string) || "19:00",
+        duration_minutes:
+          parseInt(formData.get("duration") as string, 10) || 90,
+        table_id: (formData.get("tableId") as string) || null,
+        customer_id: null,
+        status: "pending",
+        notes: (formData.get("notes") as string) || null,
+      },
+      {
+        onSuccess: () => {
+          setDialogOpen(false);
+        },
+      }
+    );
+  }
+
+  function handleStatusChange(id: string, newStatus: string) {
+    updateReservation.mutate({ id, status: newStatus });
   }
 
   // Summary
-  const todayStr = "2026-04-06";
-  const todayReservations = reservations.filter((r) => r.date === todayStr);
+  const todayReservations = displayReservations.filter(
+    (r) => r.reservation_date === todayStr
+  );
   const upcomingCount = todayReservations.filter((r) =>
     ["pending", "confirmed"].includes(r.status)
   ).length;
@@ -240,7 +213,15 @@ export default function ReservationsPage() {
   ).length;
   const totalGuests = todayReservations
     .filter((r) => ["pending", "confirmed", "seated"].includes(r.status))
-    .reduce((s, r) => s + r.partySize, 0);
+    .reduce((s, r) => s + r.party_size, 0);
+
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -353,6 +334,23 @@ export default function ReservationsPage() {
                     />
                   </div>
                 </div>
+                {tables && tables.length > 0 && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="tableId">Table</Label>
+                    <Select name="tableId">
+                      <SelectTrigger>
+                        <SelectValue placeholder="Assign a table (optional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {tables.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.table_number} (capacity: {t.capacity})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="grid gap-2">
                   <Label htmlFor="notes">Notes</Label>
                   <Textarea
@@ -364,7 +362,15 @@ export default function ReservationsPage() {
                 </div>
               </div>
               <DialogFooter>
-                <Button type="submit">Create Reservation</Button>
+                <Button
+                  type="submit"
+                  disabled={createReservation.isPending}
+                >
+                  {createReservation.isPending && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  Create Reservation
+                </Button>
               </DialogFooter>
             </form>
           </DialogContent>
@@ -447,7 +453,11 @@ export default function ReservationsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {filtered.length > 0 ? (
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : filtered.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -458,25 +468,34 @@ export default function ReservationsPage() {
                     <TableHead>Time</TableHead>
                     <TableHead>Table</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filtered.map((r) => {
-                    const statusInfo = STATUS_CONFIG[r.status];
+                    const statusInfo =
+                      STATUS_CONFIG[r.status as ReservationStatus] ??
+                      STATUS_CONFIG.pending;
                     return (
                       <TableRow key={r.id}>
                         <TableCell className="font-medium">
-                          {r.guestName}
+                          {r.customer_name}
                         </TableCell>
                         <TableCell className="text-muted-foreground">
-                          {r.phone}
+                          {r.customer_phone}
                         </TableCell>
                         <TableCell className="text-center">
-                          {r.partySize}
+                          {r.party_size}
                         </TableCell>
-                        <TableCell>{formatDate(r.date)}</TableCell>
-                        <TableCell>{formatTime(r.time)}</TableCell>
-                        <TableCell>{r.table ?? "Unassigned"}</TableCell>
+                        <TableCell>
+                          {formatDate(r.reservation_date)}
+                        </TableCell>
+                        <TableCell>
+                          {formatTime(r.reservation_time)}
+                        </TableCell>
+                        <TableCell>
+                          {r.restaurant_tables?.table_number ?? "Unassigned"}
+                        </TableCell>
                         <TableCell>
                           <Badge
                             variant="outline"
@@ -484,6 +503,32 @@ export default function ReservationsPage() {
                           >
                             {statusInfo.label}
                           </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Select
+                            value={r.status}
+                            onValueChange={(val) =>
+                              handleStatusChange(r.id, val)
+                            }
+                          >
+                            <SelectTrigger className="h-8 w-28">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="pending">Pending</SelectItem>
+                              <SelectItem value="confirmed">
+                                Confirmed
+                              </SelectItem>
+                              <SelectItem value="seated">Seated</SelectItem>
+                              <SelectItem value="completed">
+                                Completed
+                              </SelectItem>
+                              <SelectItem value="cancelled">
+                                Cancelled
+                              </SelectItem>
+                              <SelectItem value="no_show">No Show</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </TableCell>
                       </TableRow>
                     );
@@ -502,7 +547,13 @@ export default function ReservationsPage() {
       {/* Calendar View */}
       {viewMode === "calendar" && (
         <div className="space-y-4">
-          {sortedDates.length > 0 ? (
+          {isLoading ? (
+            <Card>
+              <CardContent className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </CardContent>
+            </Card>
+          ) : sortedDates.length > 0 ? (
             sortedDates.map((date) => (
               <Card key={date}>
                 <CardHeader className="pb-3">
@@ -517,9 +568,13 @@ export default function ReservationsPage() {
                 <CardContent>
                   <div className="space-y-3">
                     {groupedByDate[date]
-                      .sort((a, b) => a.time.localeCompare(b.time))
+                      .sort((a, b) =>
+                        a.reservation_time.localeCompare(b.reservation_time)
+                      )
                       .map((r) => {
-                        const statusInfo = STATUS_CONFIG[r.status];
+                        const statusInfo =
+                          STATUS_CONFIG[r.status as ReservationStatus] ??
+                          STATUS_CONFIG.pending;
                         return (
                           <div
                             key={r.id}
@@ -528,13 +583,13 @@ export default function ReservationsPage() {
                             <div className="flex flex-col gap-1">
                               <div className="flex items-center gap-2">
                                 <span className="font-medium">
-                                  {formatTime(r.time)}
+                                  {formatTime(r.reservation_time)}
                                 </span>
                                 <span className="text-muted-foreground">
                                   &middot;
                                 </span>
                                 <span className="font-medium">
-                                  {r.guestName}
+                                  {r.customer_name}
                                 </span>
                                 <Badge
                                   variant="outline"
@@ -546,16 +601,16 @@ export default function ReservationsPage() {
                               <div className="flex items-center gap-4 text-sm text-muted-foreground">
                                 <span className="flex items-center gap-1">
                                   <Users className="h-3 w-3" />
-                                  {r.partySize} guests
+                                  {r.party_size} guests
                                 </span>
                                 <span className="flex items-center gap-1">
                                   <Phone className="h-3 w-3" />
-                                  {r.phone}
+                                  {r.customer_phone}
                                 </span>
-                                {r.email && (
+                                {r.customer_email && (
                                   <span className="flex items-center gap-1">
                                     <Mail className="h-3 w-3" />
-                                    {r.email}
+                                    {r.customer_email}
                                   </span>
                                 )}
                               </div>
@@ -567,13 +622,14 @@ export default function ReservationsPage() {
                             </div>
                             <div className="flex items-center gap-2 text-sm">
                               <span className="whitespace-nowrap text-muted-foreground">
-                                {r.table ?? "No table"}
+                                {r.restaurant_tables?.table_number ??
+                                  "No table"}
                               </span>
                               <span className="text-muted-foreground">
                                 &middot;
                               </span>
                               <span className="whitespace-nowrap text-muted-foreground">
-                                {r.duration} min
+                                {r.duration_minutes} min
                               </span>
                             </div>
                           </div>

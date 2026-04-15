@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { formatINR } from "@/lib/utils/currency";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,9 +22,23 @@ import {
 } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Gift, Settings, TrendingUp, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import {
+  Gift,
+  Settings,
+  TrendingUp,
+  ArrowUpRight,
+  ArrowDownRight,
+  Loader2,
+} from "lucide-react";
+import { useTenantUser } from "@/lib/auth/hooks";
+import {
+  useLoyaltyConfig,
+  useUpdateLoyaltyConfig,
+  useLoyaltyTransactions,
+  type LoyaltyConfigRow,
+} from "@/hooks/use-loyalty";
 
-interface LoyaltyConfig {
+interface EditConfig {
   pointsPerRupee: number;
   redemptionRate: number;
   bronzeThreshold: number;
@@ -33,17 +47,14 @@ interface LoyaltyConfig {
   platinumThreshold: number;
 }
 
-interface LoyaltyTransaction {
-  id: string;
-  date: string;
-  customerName: string;
-  type: "earned" | "redeemed";
-  points: number;
-  description: string;
-  orderAmount?: number;
-}
+const DEFAULT_THRESHOLDS = {
+  bronze: 0,
+  silver: 500,
+  gold: 1000,
+  platinum: 2000,
+};
 
-const initialConfig: LoyaltyConfig = {
+const DEFAULT_CONFIG: EditConfig = {
   pointsPerRupee: 1,
   redemptionRate: 0.25,
   bronzeThreshold: 0,
@@ -52,103 +63,118 @@ const initialConfig: LoyaltyConfig = {
   platinumThreshold: 2000,
 };
 
-const mockTransactions: LoyaltyTransaction[] = [
-  {
-    id: "tx-1",
-    date: "2026-04-06",
-    customerName: "Vikram Singh",
-    type: "earned",
-    points: 45,
-    description: "Order #1055",
-    orderAmount: 450,
-  },
-  {
-    id: "tx-2",
-    date: "2026-04-05",
-    customerName: "Rajesh Kumar",
-    type: "redeemed",
-    points: 200,
-    description: "Discount on Order #1052",
-  },
-  {
-    id: "tx-3",
-    date: "2026-04-05",
-    customerName: "Rajesh Kumar",
-    type: "earned",
-    points: 86,
-    description: "Order #1052",
-    orderAmount: 860,
-  },
-  {
-    id: "tx-4",
-    date: "2026-04-03",
-    customerName: "Priya Sharma",
-    type: "earned",
-    points: 42,
-    description: "Order #1048",
-    orderAmount: 420,
-  },
-  {
-    id: "tx-5",
-    date: "2026-04-03",
-    customerName: "Amit Patel",
-    type: "earned",
-    points: 55,
-    description: "Order #1047",
-    orderAmount: 550,
-  },
-  {
-    id: "tx-6",
-    date: "2026-04-02",
-    customerName: "Sneha Reddy",
-    type: "redeemed",
-    points: 100,
-    description: "Discount on Order #1045",
-  },
-  {
-    id: "tx-7",
-    date: "2026-04-01",
-    customerName: "Priya Sharma",
-    type: "earned",
-    points: 38,
-    description: "Order #1042",
-    orderAmount: 380,
-  },
-  {
-    id: "tx-8",
-    date: "2026-03-30",
-    customerName: "Vikram Singh",
-    type: "redeemed",
-    points: 150,
-    description: "Discount on Order #1040",
-  },
-];
-
 export default function LoyaltyPage() {
-  const [config, setConfig] = useState<LoyaltyConfig>(initialConfig);
+  const { tenantUser, loading: authLoading } = useTenantUser();
+  const tenantId = tenantUser?.tenant_id ?? null;
+
+  const { data: config, isLoading: configLoading } =
+    useLoyaltyConfig(tenantId);
+  const updateConfig = useUpdateLoyaltyConfig();
+  const { data: transactions, isLoading: txLoading } =
+    useLoyaltyTransactions(tenantId);
+
   const [editing, setEditing] = useState(false);
-  const [editConfig, setEditConfig] = useState<LoyaltyConfig>(initialConfig);
+  const [editConfig, setEditConfig] = useState<EditConfig>(DEFAULT_CONFIG);
+
+  useEffect(() => {
+    if (config) {
+      const thresholds =
+        (config.tier_thresholds as typeof DEFAULT_THRESHOLDS) ??
+        DEFAULT_THRESHOLDS;
+      setEditConfig({
+        pointsPerRupee: config.points_per_rupee,
+        redemptionRate: config.redemption_rate,
+        bronzeThreshold: thresholds.bronze,
+        silverThreshold: thresholds.silver,
+        goldThreshold: thresholds.gold,
+        platinumThreshold: thresholds.platinum,
+      });
+    }
+  }, [config]);
 
   function startEditing() {
-    setEditConfig({ ...config });
     setEditing(true);
   }
 
   function saveConfig() {
-    setConfig({ ...editConfig });
-    setEditing(false);
+    if (!tenantId) return;
+    updateConfig.mutate(
+      {
+        tenant_id: tenantId,
+        points_per_rupee: editConfig.pointsPerRupee,
+        redemption_rate: editConfig.redemptionRate,
+        tier_thresholds: {
+          bronze: editConfig.bronzeThreshold,
+          silver: editConfig.silverThreshold,
+          gold: editConfig.goldThreshold,
+          platinum: editConfig.platinumThreshold,
+        },
+        is_active: true,
+      },
+      {
+        onSuccess: () => {
+          setEditing(false);
+        },
+      }
+    );
   }
 
   function cancelEditing() {
+    if (config) {
+      const thresholds =
+        (config.tier_thresholds as typeof DEFAULT_THRESHOLDS) ??
+        DEFAULT_THRESHOLDS;
+      setEditConfig({
+        pointsPerRupee: config.points_per_rupee,
+        redemptionRate: config.redemption_rate,
+        bronzeThreshold: thresholds.bronze,
+        silverThreshold: thresholds.silver,
+        goldThreshold: thresholds.gold,
+        platinumThreshold: thresholds.platinum,
+      });
+    }
     setEditing(false);
   }
 
-  const totalEarned = mockTransactions
-    .filter((t) => t.type === "earned")
+  const displayTransactions = transactions ?? [];
+
+  // Derive earned/redeemed from points sign: positive = earned, negative = redeemed
+  const totalEarned = displayTransactions
+    .filter((t) => t.points > 0)
     .reduce((sum, t) => sum + t.points, 0);
-  const totalRedeemed = mockTransactions
-    .filter((t) => t.type === "redeemed")
-    .reduce((sum, t) => sum + t.points, 0);
+  const totalRedeemed = displayTransactions
+    .filter((t) => t.points < 0)
+    .reduce((sum, t) => sum + Math.abs(t.points), 0);
+  const earnedCount = displayTransactions.filter((t) => t.points > 0).length;
+  const redeemedCount = displayTransactions.filter((t) => t.points < 0).length;
+
+  // Active display values
+  const activeConfig = config
+    ? {
+        pointsPerRupee: config.points_per_rupee,
+        redemptionRate: config.redemption_rate,
+        bronzeThreshold:
+          ((config.tier_thresholds as Record<string, number>)?.bronze as number) ??
+          0,
+        silverThreshold:
+          ((config.tier_thresholds as Record<string, number>)?.silver as number) ??
+          500,
+        goldThreshold:
+          ((config.tier_thresholds as Record<string, number>)?.gold as number) ??
+          1000,
+        platinumThreshold:
+          ((config.tier_thresholds as Record<string, number>)?.platinum as number) ??
+          2000,
+      }
+    : DEFAULT_CONFIG;
+
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -166,42 +192,68 @@ export default function LoyaltyPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Points Earned (Recent)</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Points Earned (Recent)
+            </CardTitle>
             <TrendingUp className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">
-              +{totalEarned.toLocaleString()}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              from {mockTransactions.filter((t) => t.type === "earned").length} transactions
-            </p>
+            {txLoading ? (
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            ) : (
+              <>
+                <div className="text-2xl font-bold text-green-600">
+                  +{totalEarned.toLocaleString()}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  from {earnedCount} transactions
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Points Redeemed (Recent)</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Points Redeemed (Recent)
+            </CardTitle>
             <Gift className="h-4 w-4 text-orange-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-orange-600">
-              -{totalRedeemed.toLocaleString()}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              from {mockTransactions.filter((t) => t.type === "redeemed").length} redemptions
-            </p>
+            {txLoading ? (
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            ) : (
+              <>
+                <div className="text-2xl font-bold text-orange-600">
+                  -{totalRedeemed.toLocaleString()}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  from {redeemedCount} redemptions
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Redemption Value</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Redemption Value
+            </CardTitle>
             <Settings className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {formatINR(config.redemptionRate)}
-            </div>
-            <p className="text-xs text-muted-foreground">per point redeemed</p>
+            {configLoading ? (
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            ) : (
+              <>
+                <div className="text-2xl font-bold">
+                  {formatINR(activeConfig.redemptionRate)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  per point redeemed
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -223,11 +275,17 @@ export default function LoyaltyPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {editing ? (
+          {configLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : editing ? (
             <div className="space-y-6">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label htmlFor="pointsPerRupee">Points per Rupee Spent</Label>
+                  <Label htmlFor="pointsPerRupee">
+                    Points per Rupee Spent
+                  </Label>
                   <Input
                     id="pointsPerRupee"
                     type="number"
@@ -267,7 +325,9 @@ export default function LoyaltyPage() {
               </div>
               <Separator />
               <div>
-                <Label className="text-base font-semibold">Tier Thresholds (Points)</Label>
+                <Label className="text-base font-semibold">
+                  Tier Thresholds (Points)
+                </Label>
                 <p className="text-sm text-muted-foreground mb-4">
                   Minimum total points required for each tier
                 </p>
@@ -334,7 +394,15 @@ export default function LoyaltyPage() {
                 <Button variant="outline" onClick={cancelEditing}>
                   Cancel
                 </Button>
-                <Button onClick={saveConfig}>Save Changes</Button>
+                <Button
+                  onClick={saveConfig}
+                  disabled={updateConfig.isPending}
+                >
+                  {updateConfig.isPending && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  Save Changes
+                </Button>
               </div>
             </div>
           ) : (
@@ -345,7 +413,7 @@ export default function LoyaltyPage() {
                     Points per Rupee
                   </div>
                   <div className="text-2xl font-bold">
-                    {config.pointsPerRupee}
+                    {activeConfig.pointsPerRupee}
                   </div>
                 </div>
                 <div className="rounded-lg border p-4">
@@ -353,7 +421,7 @@ export default function LoyaltyPage() {
                     Redemption Rate
                   </div>
                   <div className="text-2xl font-bold">
-                    {formatINR(config.redemptionRate)} / point
+                    {formatINR(activeConfig.redemptionRate)} / point
                   </div>
                 </div>
               </div>
@@ -365,19 +433,33 @@ export default function LoyaltyPage() {
                 <div className="flex flex-wrap gap-3">
                   <div className="flex items-center gap-2 rounded-lg border px-3 py-2">
                     <Badge>Bronze</Badge>
-                    <span className="text-sm">{config.bronzeThreshold}+ pts</span>
+                    <span className="text-sm">
+                      {activeConfig.bronzeThreshold}+ pts
+                    </span>
                   </div>
                   <div className="flex items-center gap-2 rounded-lg border px-3 py-2">
-                    <Badge className="bg-slate-400 hover:bg-slate-400/80 text-white">Silver</Badge>
-                    <span className="text-sm">{config.silverThreshold}+ pts</span>
+                    <Badge className="bg-slate-400 hover:bg-slate-400/80 text-white">
+                      Silver
+                    </Badge>
+                    <span className="text-sm">
+                      {activeConfig.silverThreshold}+ pts
+                    </span>
                   </div>
                   <div className="flex items-center gap-2 rounded-lg border px-3 py-2">
-                    <Badge className="bg-yellow-500 hover:bg-yellow-500/80 text-white">Gold</Badge>
-                    <span className="text-sm">{config.goldThreshold}+ pts</span>
+                    <Badge className="bg-yellow-500 hover:bg-yellow-500/80 text-white">
+                      Gold
+                    </Badge>
+                    <span className="text-sm">
+                      {activeConfig.goldThreshold}+ pts
+                    </span>
                   </div>
                   <div className="flex items-center gap-2 rounded-lg border px-3 py-2">
-                    <Badge className="bg-purple-600 hover:bg-purple-600/80 text-white">Platinum</Badge>
-                    <span className="text-sm">{config.platinumThreshold}+ pts</span>
+                    <Badge className="bg-purple-600 hover:bg-purple-600/80 text-white">
+                      Platinum
+                    </Badge>
+                    <span className="text-sm">
+                      {activeConfig.platinumThreshold}+ pts
+                    </span>
                   </div>
                 </div>
               </div>
@@ -391,59 +473,76 @@ export default function LoyaltyPage() {
           <CardTitle>Recent Loyalty Transactions</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Points</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Order Amount</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {mockTransactions.map((tx) => (
-                <TableRow key={tx.id}>
-                  <TableCell>{tx.date}</TableCell>
-                  <TableCell className="font-medium">
-                    {tx.customerName}
-                  </TableCell>
-                  <TableCell>
-                    {tx.type === "earned" ? (
-                      <div className="flex items-center gap-1 text-green-600">
-                        <ArrowUpRight className="h-4 w-4" />
-                        Earned
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1 text-orange-600">
-                        <ArrowDownRight className="h-4 w-4" />
-                        Redeemed
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <span
-                      className={
-                        tx.type === "earned"
-                          ? "font-medium text-green-600"
-                          : "font-medium text-orange-600"
-                      }
-                    >
-                      {tx.type === "earned" ? "+" : "-"}
-                      {tx.points}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {tx.description}
-                  </TableCell>
-                  <TableCell>
-                    {tx.orderAmount ? formatINR(tx.orderAmount) : "-"}
-                  </TableCell>
+          {txLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : displayTransactions.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Points</TableHead>
+                  <TableHead>Description</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {displayTransactions.map((tx) => {
+                  const isEarned = tx.points > 0;
+                  const customerName =
+                    tx.customers?.name ?? "Unknown";
+                  return (
+                    <TableRow key={tx.id}>
+                      <TableCell>
+                        {new Date(tx.created_at).toLocaleDateString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {customerName}
+                      </TableCell>
+                      <TableCell>
+                        {isEarned ? (
+                          <div className="flex items-center gap-1 text-green-600">
+                            <ArrowUpRight className="h-4 w-4" />
+                            Earned
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1 text-orange-600">
+                            <ArrowDownRight className="h-4 w-4" />
+                            Redeemed
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={
+                            isEarned
+                              ? "font-medium text-green-600"
+                              : "font-medium text-orange-600"
+                          }
+                        >
+                          {isEarned ? "+" : "-"}
+                          {Math.abs(tx.points)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {tx.description}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="py-12 text-center text-muted-foreground">
+              <p>No loyalty transactions yet.</p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

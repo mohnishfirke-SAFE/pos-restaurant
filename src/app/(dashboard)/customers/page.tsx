@@ -29,134 +29,137 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Search, ChevronDown, ChevronRight, Users } from "lucide-react";
+import {
+  Plus,
+  Search,
+  ChevronDown,
+  ChevronRight,
+  Users,
+  Loader2,
+} from "lucide-react";
+import { useTenantUser } from "@/lib/auth/hooks";
+import {
+  useCustomers,
+  useCreateCustomer,
+  useCustomerOrders,
+} from "@/hooks/use-customers";
 
 type LoyaltyTier = "bronze" | "silver" | "gold" | "platinum";
 
-interface Customer {
-  id: string;
-  name: string;
-  phone: string;
-  email: string;
-  dob: string;
-  preferences: string;
-  totalOrders: number;
-  totalSpent: number;
-  loyaltyPoints: number;
-  tier: LoyaltyTier;
-  lastVisit: string;
-}
-
-const mockCustomers: Customer[] = [
-  {
-    id: "cust-1",
-    name: "Rajesh Kumar",
-    phone: "+91 98765 43210",
-    email: "rajesh.kumar@email.com",
-    dob: "1985-06-15",
-    preferences: "Prefers non-veg, no peanuts",
-    totalOrders: 48,
-    totalSpent: 24560,
-    loyaltyPoints: 2456,
-    tier: "platinum",
-    lastVisit: "2026-04-05",
-  },
-  {
-    id: "cust-2",
-    name: "Priya Sharma",
-    phone: "+91 91234 56789",
-    email: "priya.sharma@email.com",
-    dob: "1992-11-22",
-    preferences: "Vegetarian, prefers mild spice",
-    totalOrders: 32,
-    totalSpent: 15800,
-    loyaltyPoints: 1580,
-    tier: "gold",
-    lastVisit: "2026-04-03",
-  },
-  {
-    id: "cust-3",
-    name: "Amit Patel",
-    phone: "+91 87654 32100",
-    email: "amit.patel@email.com",
-    dob: "1990-03-08",
-    preferences: "Loves biryani specials",
-    totalOrders: 18,
-    totalSpent: 8900,
-    loyaltyPoints: 890,
-    tier: "silver",
-    lastVisit: "2026-03-29",
-  },
-  {
-    id: "cust-4",
-    name: "Sneha Reddy",
-    phone: "+91 76543 21098",
-    email: "sneha.r@email.com",
-    dob: "1988-09-14",
-    preferences: "Gluten free options",
-    totalOrders: 8,
-    totalSpent: 3200,
-    loyaltyPoints: 320,
-    tier: "bronze",
-    lastVisit: "2026-03-20",
-  },
-  {
-    id: "cust-5",
-    name: "Vikram Singh",
-    phone: "+91 65432 10987",
-    email: "vikram.s@email.com",
-    dob: "1995-01-30",
-    preferences: "Regular lunch customer",
-    totalOrders: 25,
-    totalSpent: 11200,
-    loyaltyPoints: 1120,
-    tier: "gold",
-    lastVisit: "2026-04-06",
-  },
-];
-
-function getTierBadge(tier: LoyaltyTier) {
-  const config: Record<LoyaltyTier, { className: string }> = {
+function getTierBadge(tier: string) {
+  const config: Record<string, { className: string }> = {
     bronze: { className: "" },
     silver: { className: "bg-slate-400 hover:bg-slate-400/80 text-white" },
     gold: { className: "bg-yellow-500 hover:bg-yellow-500/80 text-white" },
     platinum: { className: "bg-purple-600 hover:bg-purple-600/80 text-white" },
   };
+  const c = config[tier] || config.bronze;
   return (
-    <Badge className={config[tier].className}>
+    <Badge className={c.className}>
       {tier.charAt(0).toUpperCase() + tier.slice(1)}
     </Badge>
   );
 }
 
+function formatLastVisit(dateStr: string | null): string {
+  if (!dateStr) return "-";
+  return new Date(dateStr).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function CustomerExpandedRow({ customerId }: { customerId: string }) {
+  const { data: orders, isLoading } = useCustomerOrders(customerId);
+
+  if (isLoading) {
+    return (
+      <div className="py-4 text-center">
+        <Loader2 className="mx-auto h-4 w-4 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!orders || orders.length === 0) {
+    return (
+      <div className="py-2 text-sm text-muted-foreground">
+        No orders yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 text-sm text-muted-foreground">
+      {orders.slice(0, 5).map((order) => (
+        <div
+          key={order.id}
+          className="flex justify-between rounded border bg-background p-3"
+        >
+          <span>
+            Order #{order.order_number} &mdash;{" "}
+            {order.order_items
+              .map(
+                (item) =>
+                  `${item.quantity}x item`
+              )
+              .join(", ")}
+          </span>
+          <span className="font-medium text-foreground">
+            {formatINR(order.total)}
+          </span>
+        </div>
+      ))}
+      {orders.length > 5 && (
+        <p className="text-xs">+ {orders.length - 5} more orders</p>
+      )}
+    </div>
+  );
+}
+
 export default function CustomersPage() {
+  const { tenantUser, loading: authLoading } = useTenantUser();
+  const tenantId = tenantUser?.tenant_id ?? null;
+
   const [search, setSearch] = useState("");
-  const [customers, setCustomers] = useState<Customer[]>(mockCustomers);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const filteredCustomers = customers.filter(
-    (c) =>
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.phone.includes(search)
+  const { data: customers, isLoading } = useCustomers(
+    tenantId,
+    search || undefined
   );
+  const createCustomer = useCreateCustomer();
 
   function handleAddCustomer(formData: FormData) {
-    const newCustomer: Customer = {
-      id: crypto.randomUUID(),
-      name: formData.get("name") as string,
-      phone: formData.get("phone") as string,
-      email: formData.get("email") as string,
-      dob: formData.get("dob") as string,
-      preferences: formData.get("preferences") as string,
-      totalOrders: 0,
-      totalSpent: 0,
-      loyaltyPoints: 0,
-      tier: "bronze",
-      lastVisit: "-",
-    };
-    setCustomers((prev) => [...prev, newCustomer]);
-    setDialogOpen(false);
+    if (!tenantId) return;
+
+    const preferences = formData.get("preferences") as string;
+    createCustomer.mutate(
+      {
+        tenant_id: tenantId,
+        name: (formData.get("name") as string) || "",
+        phone: (formData.get("phone") as string) || null,
+        email: (formData.get("email") as string) || null,
+        date_of_birth: (formData.get("dob") as string) || null,
+        preferences: preferences ? { notes: preferences } : {},
+      },
+      {
+        onSuccess: () => {
+          setDialogOpen(false);
+        },
+      }
+    );
+  }
+
+  const displayCustomers = customers ?? [];
+
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   return (
@@ -217,7 +220,15 @@ export default function CustomersPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button type="submit">Add Customer</Button>
+              <Button
+                type="submit"
+                disabled={createCustomer.isPending}
+              >
+                {createCustomer.isPending && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Add Customer
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -242,7 +253,11 @@ export default function CustomersPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {filteredCustomers.length > 0 ? (
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : displayCustomers.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -258,7 +273,7 @@ export default function CustomersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredCustomers.map((customer) => (
+                {displayCustomers.map((customer) => (
                   <>
                     <TableRow
                       key={customer.id}
@@ -279,15 +294,21 @@ export default function CustomersPage() {
                       <TableCell className="font-medium">
                         {customer.name}
                       </TableCell>
-                      <TableCell>{customer.phone}</TableCell>
+                      <TableCell>{customer.phone ?? "-"}</TableCell>
                       <TableCell className="text-muted-foreground">
-                        {customer.email}
+                        {customer.email ?? "-"}
                       </TableCell>
-                      <TableCell>{customer.totalOrders}</TableCell>
-                      <TableCell>{formatINR(customer.totalSpent)}</TableCell>
-                      <TableCell>{customer.loyaltyPoints.toLocaleString()}</TableCell>
-                      <TableCell>{getTierBadge(customer.tier)}</TableCell>
-                      <TableCell>{customer.lastVisit}</TableCell>
+                      <TableCell>{customer.total_orders}</TableCell>
+                      <TableCell>{formatINR(customer.total_spent)}</TableCell>
+                      <TableCell>
+                        {customer.loyalty_points.toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        {getTierBadge(customer.loyalty_tier)}
+                      </TableCell>
+                      <TableCell>
+                        {formatLastVisit(customer.last_visit_at)}
+                      </TableCell>
                     </TableRow>
                     {expandedId === customer.id && (
                       <TableRow key={`${customer.id}-details`}>
@@ -296,28 +317,19 @@ export default function CustomersPage() {
                             <h4 className="font-semibold text-sm">
                               Order History
                             </h4>
-                            <div className="space-y-2 text-sm text-muted-foreground">
-                              <div className="flex justify-between rounded border bg-background p-3">
-                                <span>Order #1042 - Chicken Biryani x2, Butter Naan x4</span>
-                                <span className="font-medium text-foreground">{formatINR(860)}</span>
-                              </div>
-                              <div className="flex justify-between rounded border bg-background p-3">
-                                <span>Order #1038 - Paneer Butter Masala, Jeera Rice</span>
-                                <span className="font-medium text-foreground">{formatINR(420)}</span>
-                              </div>
-                              <div className="flex justify-between rounded border bg-background p-3">
-                                <span>Order #1025 - Veg Thali, Mango Lassi x2</span>
-                                <span className="font-medium text-foreground">{formatINR(350)}</span>
-                              </div>
-                            </div>
-                            {customer.preferences && (
-                              <div className="text-sm">
-                                <span className="text-muted-foreground">
-                                  Preferences:{" "}
-                                </span>
-                                <span>{customer.preferences}</span>
-                              </div>
-                            )}
+                            <CustomerExpandedRow customerId={customer.id} />
+                            {customer.preferences &&
+                              typeof customer.preferences === "object" &&
+                              "notes" in (customer.preferences as object) && (
+                                <div className="text-sm">
+                                  <span className="text-muted-foreground">
+                                    Preferences:{" "}
+                                  </span>
+                                  <span>
+                                    {(customer.preferences as { notes?: string }).notes}
+                                  </span>
+                                </div>
+                              )}
                           </div>
                         </TableCell>
                       </TableRow>
