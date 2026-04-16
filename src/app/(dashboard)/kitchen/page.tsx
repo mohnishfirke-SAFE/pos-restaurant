@@ -106,7 +106,6 @@ interface DbKot {
   created_at: string;
   accepted_at: string | null;
   ready_at: string | null;
-  cancel_reason: string | null;
   orders: {
     id: string;
     order_number: string;
@@ -148,7 +147,7 @@ function mapDbKotToKOT(kot: DbKot): KOT {
     status: kot.status,
     createdAt: new Date(kot.created_at),
     items,
-    cancelReason: kot.cancel_reason ?? null,
+    cancelReason: null,
     aggregatorPlatform: order?.aggregator_platform ?? null,
     customerName: null,
     deliveryPartnerName: null,
@@ -643,7 +642,6 @@ export default function KitchenDisplayPage() {
           created_at,
           accepted_at,
           ready_at,
-          cancel_reason,
           orders (
             id,
             order_number,
@@ -792,7 +790,6 @@ export default function KitchenDisplayPage() {
         .from("kots")
         .update({
           status: "cancelled",
-          cancel_reason: reason,
           updated_at: new Date().toISOString(),
         })
         .eq("id", id)
