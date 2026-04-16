@@ -199,8 +199,8 @@ export default function TablesPage() {
 
   function handleStartOrder(table: TableData) {
     const id = table.id;
-    setSelectedTable(null);
     router.push(`/pos?tableId=${encodeURIComponent(id)}&orderType=dine_in`);
+    setSelectedTable(null);
   }
 
   // Loading state
@@ -505,8 +505,8 @@ export default function TablesPage() {
                         className="mt-2 w-full"
                         variant="outline"
                         onClick={() => {
-                          setSelectedTable(null);
                           router.push("/orders");
+                          setSelectedTable(null);
                         }}
                       >
                         View Order
