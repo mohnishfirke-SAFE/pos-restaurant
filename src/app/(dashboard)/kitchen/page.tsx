@@ -321,7 +321,7 @@ function KOTCard({
             : "border-zinc-700 bg-zinc-800/80"
         )}
       >
-        <CardHeader className="p-4 pb-2">
+        <CardHeader className="p-3 pb-2">
           {/* Done / Cancelled badge */}
           {isDone && (
             <div className="flex items-center gap-2 -mt-1 mb-2">
@@ -435,7 +435,7 @@ function KOTCard({
 
         <Separator className="bg-zinc-700" />
 
-        <CardContent className="p-4 pt-3">
+        <CardContent className="p-3 pt-2">
           <ul className="space-y-2">
             {kot.items.map((item) => (
               <li key={item.id}>
@@ -471,34 +471,11 @@ function KOTCard({
 
           {/* Action buttons — hidden for done/rejected */}
           {!isDone && (
-            <div className="mt-4 flex gap-2">
-              {kot.status === "pending" && (
-                <Button
-                  variant="outline"
-                  className="gap-2 border-red-800/50 text-red-400 hover:bg-red-950/40 hover:text-red-300"
-                  onClick={() => {
-                    setRejectReason("");
-                    setRejectDialogOpen(true);
-                  }}
-                >
-                  <Ban className="h-4 w-4" />
-                  Reject
-                </Button>
-              )}
-              {backAction && (
-                <Button
-                  variant="outline"
-                  className="gap-2 border-zinc-600 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
-                  onClick={() => onAction(kot.id, backAction.newStatus, kot.orderId)}
-                >
-                  <backAction.icon className="h-4 w-4" />
-                  {backAction.label}
-                </Button>
-              )}
+            <div className="mt-4 space-y-2">
               {action && (
                 <Button
                   className={cn(
-                    "flex-1 gap-2 font-semibold",
+                    "w-full gap-2 font-semibold",
                     kot.status === "pending" &&
                       "bg-blue-600 text-white hover:bg-blue-700",
                     kot.status === "in_progress" &&
@@ -512,6 +489,33 @@ function KOTCard({
                   {action.label}
                 </Button>
               )}
+              <div className="flex gap-2">
+                {kot.status === "pending" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 gap-1 border-red-800/50 text-red-400 hover:bg-red-950/40 hover:text-red-300 text-xs"
+                    onClick={() => {
+                      setRejectReason("");
+                      setRejectDialogOpen(true);
+                    }}
+                  >
+                    <Ban className="h-3 w-3" />
+                    Reject
+                  </Button>
+                )}
+                {backAction && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 gap-1 border-zinc-600 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 text-xs"
+                    onClick={() => onAction(kot.id, backAction.newStatus, kot.orderId)}
+                  >
+                    <backAction.icon className="h-3 w-3" />
+                    {backAction.label}
+                  </Button>
+                )}
+              </div>
             </div>
           )}
         </CardContent>
@@ -580,7 +584,7 @@ function KDSColumn({
   accentColor: string;
 }) {
   return (
-    <div className="flex min-w-[320px] flex-1 flex-col">
+    <div className="flex min-w-[280px] flex-1 flex-col">
       <div className="flex items-center gap-3 border-b border-zinc-700 px-4 py-3">
         <div className={cn("h-2.5 w-2.5 rounded-full", accentColor)} />
         <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-300">
