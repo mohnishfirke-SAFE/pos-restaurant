@@ -15,6 +15,11 @@ import {
   Settings,
   Truck,
   ArrowLeftRight,
+  Building2,
+  Receipt,
+  CreditCard,
+  Printer,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 import type { Permission } from "@/lib/auth/permissions";
@@ -131,5 +136,12 @@ export const mainNav: NavItem[] = [
     href: "/settings",
     icon: Settings,
     permission: "settings:read",
+    children: [
+      { title: "Branches", href: "/settings/branches", icon: Building2, permission: "branches:read" },
+      { title: "Taxes", href: "/settings/taxes", icon: Receipt, permission: "settings:read" },
+      { title: "Payments", href: "/settings/payments", icon: CreditCard, permission: "payments:read" },
+      { title: "Printers", href: "/settings/printers", icon: Printer, permission: "settings:read" },
+      { title: "Billing", href: "/settings/billing", icon: Wallet, permission: "billing:read" },
+    ],
   },
 ];
