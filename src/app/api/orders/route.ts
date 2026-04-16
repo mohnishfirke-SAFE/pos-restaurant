@@ -46,6 +46,17 @@ export async function POST(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  // Mark table as occupied for dine-in orders
+  if (orderFields.table_id && order.status !== "draft") {
+    await supabase
+      .from("restaurant_tables")
+      .update({
+        status: "occupied",
+        current_order_id: order.id,
+      })
+      .eq("id", orderFields.table_id);
+  }
+
   // Create KOT + order items (only for confirmed orders with items)
   if (order.status !== "draft" && items?.length) {
     const { error: kotError } = await supabase.from("kots").insert({

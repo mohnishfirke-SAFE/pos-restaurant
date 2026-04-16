@@ -28,7 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Plus, Users, Clock, ShoppingCart, Trash2, Loader2 } from "lucide-react";
+import { Plus, Users, Clock, ShoppingCart, Trash2, Loader2, Wrench } from "lucide-react";
 import { useTenantUser } from "@/lib/auth/hooks";
 import { useBranchStore } from "@/stores/branch-store";
 import { useTables, useCreateTable, useUpdateTableStatus, useDeleteTable } from "@/hooks/use-tables";
@@ -93,7 +93,7 @@ const STATUS_STYLES: Record<
   blocked: {
     border: "border-purple-400",
     bg: "bg-purple-50 dark:bg-purple-950/20",
-    label: "Blocked",
+    label: "Inactive",
     badgeClass: "bg-purple-100 text-purple-700 border-purple-200",
   },
 };
@@ -341,7 +341,7 @@ export default function TablesPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
         <Card>
           <CardContent className="pt-6">
             <div className="text-2xl font-bold">{summary.total}</div>
@@ -370,6 +370,14 @@ export default function TablesPage() {
               {summary.reserved}
             </div>
             <p className="text-xs text-muted-foreground">Reserved</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-2xl font-bold text-purple-600">
+              {floorTables.filter((t) => t.status === "blocked").length}
+            </div>
+            <p className="text-xs text-muted-foreground">Inactive</p>
           </CardContent>
         </Card>
       </div>
@@ -447,6 +455,16 @@ export default function TablesPage() {
                             <p className="text-sm text-muted-foreground italic">
                               Reserved
                             </p>
+                          </div>
+                        )}
+
+                        {/* Inactive / Maintenance details */}
+                        {table.status === "blocked" && (
+                          <div className="mt-3 space-y-1">
+                            <div className="flex items-center gap-1 text-sm text-purple-600">
+                              <Wrench className="h-3.5 w-3.5" />
+                              <span className="italic">Under maintenance</span>
+                            </div>
                           </div>
                         )}
                       </CardContent>
@@ -570,6 +588,38 @@ export default function TablesPage() {
                       </Button>
                     </div>
                   )}
+
+                  {/* Mark as Inactive / Maintenance */}
+                  {selectedTable.status === "blocked" ? (
+                    <Button
+                      className="w-full gap-2"
+                      variant="outline"
+                      onClick={() => {
+                        updateTableStatus.mutate({
+                          id: selectedTable.id,
+                          status: "available",
+                        });
+                        setSelectedTable(null);
+                      }}
+                    >
+                      Reactivate Table
+                    </Button>
+                  ) : selectedTable.status !== "occupied" ? (
+                    <Button
+                      className="w-full gap-2"
+                      variant="outline"
+                      onClick={() => {
+                        updateTableStatus.mutate({
+                          id: selectedTable.id,
+                          status: "blocked",
+                        });
+                        setSelectedTable(null);
+                      }}
+                    >
+                      <Wrench className="h-4 w-4" />
+                      Mark Inactive / Maintenance
+                    </Button>
+                  ) : null}
                 </div>
 
                 {/* Delete table */}
