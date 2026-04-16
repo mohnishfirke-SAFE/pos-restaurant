@@ -4,8 +4,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import type { Tables } from "@/lib/db/types";
 
+type OrderJoin = {
+  id: string;
+  total: number;
+  created_at: string;
+};
+
 type RestaurantTable = Tables<"restaurant_tables"> & {
-  orders?: { id: string; total: number; created_at: string } | null;
+  // orders join via orders.table_id → restaurant_tables.id returns an array
+  orders: OrderJoin[] | null;
 };
 
 export function useTables(tenantId: string | null, branchId: string | null) {

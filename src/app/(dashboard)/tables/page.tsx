@@ -37,8 +37,15 @@ import { useTables, useCreateTable, useUpdateTableStatus } from "@/hooks/use-tab
 // Types
 // ---------------------------------------------------------------------------
 
-type TableStatus = "available" | "occupied" | "reserved" | "cleaning";
+type TableStatus = "available" | "occupied" | "reserved" | "cleaning" | "blocked";
+
 type TableShape = "square" | "round" | "rectangle";
+
+interface OrderJoin {
+  id: string;
+  total: number;
+  created_at: string;
+}
 
 interface TableData {
   id: string;
@@ -48,7 +55,7 @@ interface TableData {
   shape: string;
   status: TableStatus;
   current_order_id: string | null;
-  orders?: { id: string; total: number; created_at: string } | null;
+  orders: OrderJoin[] | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +90,32 @@ const STATUS_STYLES: Record<
     label: "Cleaning",
     badgeClass: "bg-gray-100 text-gray-700 border-gray-200",
   },
+  blocked: {
+    border: "border-purple-400",
+    bg: "bg-purple-50 dark:bg-purple-950/20",
+    label: "Blocked",
+    badgeClass: "bg-purple-100 text-purple-700 border-purple-200",
+  },
 };
+
+/** Normalize the orders join — use current_order_id to find the right order */
+function getOrderMeta(
+  orders: OrderJoin[] | null | undefined,
+  currentOrderId: string | null
+): {
+  total: number | null;
+  createdAt: string | null;
+} {
+  if (!orders || !Array.isArray(orders) || orders.length === 0) {
+    return { total: null, createdAt: null };
+  }
+  // Find the current order by ID, or fall back to the first order
+  const current = currentOrderId
+    ? orders.find((o) => o.id === currentOrderId)
+    : orders[0];
+  if (!current) return { total: null, createdAt: null };
+  return { total: current.total, createdAt: current.created_at };
+}
 
 function getElapsedTime(since: string): string {
   const diff = Date.now() - new Date(since).getTime();
@@ -106,7 +138,7 @@ export default function TablesPage() {
   const branchId = tenantUser?.branch_id || activeBranchId;
   const tenantId = tenantUser?.tenant_id ?? null;
 
-  const { data: tables = [], isLoading } = useTables(tenantId, branchId);
+  const { data: tables = [], isLoading, error: tablesError } = useTables(tenantId, branchId);
   const createTable = useCreateTable();
   const updateTableStatus = useUpdateTableStatus();
 
@@ -165,12 +197,28 @@ export default function TablesPage() {
     );
   }
 
+  function handleStartOrder(table: TableData) {
+    const id = table.id;
+    setSelectedTable(null);
+    router.push(`/pos?tableId=${encodeURIComponent(id)}&orderType=dine_in`);
+  }
+
   // Loading state
   if (isLoading || tenantLoading) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="mr-2 h-6 w-6 animate-spin" />
         <span className="text-lg text-muted-foreground">Loading tables...</span>
+      </div>
+    );
+  }
+
+  // Error state
+  if (tablesError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-3">
+        <p className="text-lg font-medium text-destructive">Failed to load tables</p>
+        <p className="text-sm text-muted-foreground">{tablesError.message}</p>
       </div>
     );
   }
@@ -273,8 +321,13 @@ export default function TablesPage() {
                   {createTable.isPending && (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   )}
-                  Add Table
+                  {createTable.error ? "Retry" : "Add Table"}
                 </Button>
+                {createTable.error && (
+                  <p className="text-xs text-destructive">
+                    {createTable.error.message}
+                  </p>
+                )}
               </DialogFooter>
             </form>
           </DialogContent>
@@ -331,10 +384,9 @@ export default function TablesPage() {
               {tables
                 .filter((t) => t.floor === floor)
                 .map((table) => {
-                  const status = table.status as TableStatus;
-                  const style = STATUS_STYLES[status];
-                  const currentOrderTotal = table.orders?.total;
-                  const occupiedSince = table.orders?.created_at;
+                  const status = (table.status || "available") as TableStatus;
+                  const style = STATUS_STYLES[status] || STATUS_STYLES.available;
+                  const { total: currentOrderTotal, createdAt: occupiedSince } = getOrderMeta(table.orders, table.current_order_id);
                   return (
                     <Card
                       key={table.id}
@@ -368,7 +420,7 @@ export default function TablesPage() {
                         {/* Occupied details */}
                         {table.status === "occupied" && (
                           <div className="mt-3 space-y-1">
-                            {currentOrderTotal !== undefined && currentOrderTotal !== null && (
+                            {currentOrderTotal !== null && (
                               <div className="flex items-center gap-1 text-sm font-medium">
                                 <ShoppingCart className="h-3.5 w-3.5" />
                                 {formatINR(currentOrderTotal)}
@@ -409,10 +461,9 @@ export default function TablesPage() {
       >
         <DialogContent>
           {selectedTable && (() => {
-            const status = selectedTable.status as TableStatus;
-            const style = STATUS_STYLES[status];
-            const currentOrderTotal = selectedTable.orders?.total;
-            const occupiedSince = selectedTable.orders?.created_at;
+            const status = (selectedTable.status || "available") as TableStatus;
+            const style = STATUS_STYLES[status] || STATUS_STYLES.available;
+            const { total: currentOrderTotal, createdAt: occupiedSince } = getOrderMeta(selectedTable.orders, selectedTable.current_order_id);
             return (
               <>
                 <DialogHeader>
@@ -439,7 +490,7 @@ export default function TablesPage() {
                   {selectedTable.status === "occupied" && (
                     <div className="space-y-2 rounded-md border p-3">
                       <h4 className="text-sm font-medium">Current Order</h4>
-                      {currentOrderTotal !== undefined && currentOrderTotal !== null && (
+                      {currentOrderTotal !== null && (
                         <p className="text-lg font-bold">
                           {formatINR(currentOrderTotal)}
                         </p>
@@ -484,14 +535,10 @@ export default function TablesPage() {
                     </div>
                   )}
 
-                  {selectedTable.status === "available" && (
+                  {(selectedTable.status === "available" || !selectedTable.status) && (
                     <Button
                       className="w-full"
-                      onClick={() => {
-                        const id = selectedTable.id;
-                        setSelectedTable(null);
-                        router.push(`/pos?tableId=${encodeURIComponent(id)}&orderType=dine_in`);
-                      }}
+                      onClick={() => handleStartOrder(selectedTable)}
                     >
                       Start New Order
                     </Button>

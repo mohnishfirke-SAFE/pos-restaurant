@@ -6,6 +6,7 @@ import type { User } from "@supabase/supabase-js";
 import type { UserRole, JWTClaims } from "@/types";
 
 interface TenantUser {
+  user_id: string;
   role: UserRole;
   tenant_id: string;
   branch_id: string | null;
@@ -30,7 +31,7 @@ export function useTenantUser(): { tenantUser: TenantUser | null; loading: boole
       }
       const { data } = await supabase
         .from("tenant_users")
-        .select("role, tenant_id, branch_id, display_name")
+        .select("user_id, role, tenant_id, branch_id, display_name")
         .eq("user_id", user.id)
         .eq("is_active", true)
         .maybeSingle();
