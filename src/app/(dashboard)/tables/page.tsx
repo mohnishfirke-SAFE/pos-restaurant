@@ -28,10 +28,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Plus, Users, Clock, ShoppingCart, Loader2 } from "lucide-react";
+import { Plus, Users, Clock, ShoppingCart, Trash2, Loader2 } from "lucide-react";
 import { useTenantUser } from "@/lib/auth/hooks";
 import { useBranchStore } from "@/stores/branch-store";
-import { useTables, useCreateTable, useUpdateTableStatus } from "@/hooks/use-tables";
+import { useTables, useCreateTable, useUpdateTableStatus, useDeleteTable } from "@/hooks/use-tables";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -130,6 +130,8 @@ function getElapsedTime(since: string): string {
 // Component
 // ---------------------------------------------------------------------------
 
+const ALL_FLOORS = ["Ground Floor", "First Floor", "Second Floor"];
+
 export default function TablesPage() {
   const router = useRouter();
   const { tenantUser, loading: tenantLoading } = useTenantUser();
@@ -141,15 +143,19 @@ export default function TablesPage() {
   const { data: tables = [], isLoading, error: tablesError } = useTables(tenantId, branchId);
   const createTable = useCreateTable();
   const updateTableStatus = useUpdateTableStatus();
+  const deleteTable = useDeleteTable();
 
   const [selectedTable, setSelectedTable] = useState<TableData | null>(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
-  // Derive floors dynamically from table data
-  const floors = useMemo(
-    () => (tables.length ? [...new Set(tables.map((t) => t.floor))] : ["Ground Floor"]),
-    [tables]
-  );
+  // Use ALL_FLOORS as the base, include any custom floors from existing data
+  const floors = useMemo(() => {
+    const customFloors = tables.length
+      ? [...new Set(tables.map((t) => t.floor))].filter((f) => !ALL_FLOORS.includes(f))
+      : [];
+    return [...ALL_FLOORS, ...customFloors];
+  }, [tables]);
 
   const [activeFloor, setActiveFloor] = useState(floors[0]);
 
@@ -294,7 +300,7 @@ export default function TablesPage() {
                       <SelectValue placeholder="Select floor" />
                     </SelectTrigger>
                     <SelectContent>
-                      {floors.map((f) => (
+                      {ALL_FLOORS.map((f) => (
                         <SelectItem key={f} value={f}>
                           {f}
                         </SelectItem>
@@ -565,9 +571,66 @@ export default function TablesPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Delete table */}
+                <div className="mt-4 border-t pt-4">
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 text-destructive border-destructive/30 hover:bg-destructive/10"
+                    onClick={() => setDeleteConfirmOpen(true)}
+                    disabled={selectedTable.status === "occupied"}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete Table
+                  </Button>
+                  {selectedTable.status === "occupied" && (
+                    <p className="mt-1 text-xs text-muted-foreground text-center">
+                      Cannot delete while occupied
+                    </p>
+                  )}
+                </div>
               </>
             );
           })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Table {selectedTable?.table_number}?</DialogTitle>
+            <DialogDescription>
+              This will remove the table from the floor plan. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteConfirmOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteTable.isPending}
+              onClick={() => {
+                if (selectedTable) {
+                  deleteTable.mutate(selectedTable.id, {
+                    onSuccess: () => {
+                      setDeleteConfirmOpen(false);
+                      setSelectedTable(null);
+                    },
+                  });
+                }
+              }}
+            >
+              {deleteTable.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Delete
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
