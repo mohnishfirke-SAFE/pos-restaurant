@@ -15,6 +15,8 @@ import {
   CheckCircle2,
   Play,
   ArrowRight,
+  ArrowLeft,
+  RotateCcw,
   User,
   Phone,
   MapPin,
@@ -278,7 +280,16 @@ function KOTCard({
     ready: { label: "Picked Up / Served", newStatus: "served", icon: ArrowRight },
   };
 
+  const backActionMap: Record<
+    string,
+    { label: string; newStatus: KotStatus; icon: typeof ArrowLeft }
+  > = {
+    in_progress: { label: "Back to New", newStatus: "pending", icon: ArrowLeft },
+    ready: { label: "Back to In Progress", newStatus: "in_progress", icon: RotateCcw },
+  };
+
   const action = actionMap[kot.status];
+  const backAction = backActionMap[kot.status];
 
   return (
     <Card
@@ -400,23 +411,35 @@ function KOTCard({
           ))}
         </ul>
 
-        {action && (
-          <Button
-            className={cn(
-              "mt-4 w-full gap-2 font-semibold",
-              kot.status === "pending" &&
-                "bg-blue-600 text-white hover:bg-blue-700",
-              kot.status === "in_progress" &&
-                "bg-green-600 text-white hover:bg-green-700",
-              kot.status === "ready" &&
-                "bg-amber-600 text-white hover:bg-amber-700"
-            )}
-            onClick={() => onAction(kot.id, action.newStatus, kot.orderId)}
-          >
-            <action.icon className="h-4 w-4" />
-            {action.label}
-          </Button>
-        )}
+        <div className="mt-4 flex gap-2">
+          {backAction && (
+            <Button
+              variant="outline"
+              className="gap-2 border-zinc-600 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
+              onClick={() => onAction(kot.id, backAction.newStatus, kot.orderId)}
+            >
+              <backAction.icon className="h-4 w-4" />
+              {backAction.label}
+            </Button>
+          )}
+          {action && (
+            <Button
+              className={cn(
+                "flex-1 gap-2 font-semibold",
+                kot.status === "pending" &&
+                  "bg-blue-600 text-white hover:bg-blue-700",
+                kot.status === "in_progress" &&
+                  "bg-green-600 text-white hover:bg-green-700",
+                kot.status === "ready" &&
+                  "bg-amber-600 text-white hover:bg-amber-700"
+              )}
+              onClick={() => onAction(kot.id, action.newStatus, kot.orderId)}
+            >
+              <action.icon className="h-4 w-4" />
+              {action.label}
+            </Button>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
