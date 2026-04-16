@@ -22,6 +22,8 @@ import {
   MapPin,
   Timer,
   XCircle,
+  Ban,
+  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +31,15 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { KotStatus, OrderType } from "@/types";
 
@@ -51,6 +62,7 @@ interface KOT {
   status: KotStatus;
   createdAt: Date;
   items: KOTItem[];
+  cancelReason: string | null;
   // Platform integration fields
   aggregatorPlatform: string | null;
   customerName: string | null;
@@ -94,6 +106,7 @@ interface DbKot {
   created_at: string;
   accepted_at: string | null;
   ready_at: string | null;
+  cancel_reason: string | null;
   orders: {
     id: string;
     order_number: string;
@@ -135,6 +148,7 @@ function mapDbKotToKOT(kot: DbKot): KOT {
     status: kot.status,
     createdAt: new Date(kot.created_at),
     items,
+    cancelReason: kot.cancel_reason ?? null,
     aggregatorPlatform: order?.aggregator_platform ?? null,
     customerName: null,
     deliveryPartnerName: null,
@@ -245,14 +259,18 @@ function PlatformBadge({ platform }: { platform: string }) {
 function KOTCard({
   kot,
   onAction,
+  onReject,
 }: {
   kot: KOT;
   onAction: (id: string, newStatus: KotStatus, orderId: string) => void;
+  onReject: (id: string, reason: string, orderId: string) => void;
 }) {
   const [elapsed, setElapsed] = useState(formatElapsed(kot.createdAt));
   const [etaCountdown, setEtaCountdown] = useState(
     kot.pickupEta ? formatEtaCountdown(kot.pickupEta) : null
   );
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -270,6 +288,7 @@ function KOTCard({
   const platformConfig = kot.aggregatorPlatform
     ? PLATFORM_CONFIG[kot.aggregatorPlatform]
     : null;
+  const isDone = kot.status === "served" || kot.status === "cancelled";
 
   const actionMap: Record<
     string,
@@ -292,156 +311,256 @@ function KOTCard({
   const backAction = backActionMap[kot.status];
 
   return (
-    <Card
-      className={cn(
-        "shadow-lg",
-        isOnline && platformConfig
-          ? `border-2 ${platformConfig.borderColor} bg-zinc-800/90`
-          : "border-zinc-700 bg-zinc-800/80"
-      )}
-    >
-      <CardHeader className="p-4 pb-2">
-        {/* Platform banner for online orders */}
-        {isOnline && kot.aggregatorPlatform && (
-          <div className="flex items-center justify-between -mt-1 mb-2">
-            <PlatformBadge platform={kot.aggregatorPlatform} />
-            {kot.aggregatorOrderId && (
-              <span className="text-[10px] font-mono text-zinc-500">
-                {kot.aggregatorOrderId}
-              </span>
-            )}
-          </div>
+    <>
+      <Card
+        className={cn(
+          "shadow-lg",
+          isDone && "opacity-70",
+          kot.status === "cancelled" && "border-red-800/60",
+          isOnline && platformConfig
+            ? `border-2 ${platformConfig.borderColor} bg-zinc-800/90`
+            : "border-zinc-700 bg-zinc-800/80"
         )}
-
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <CardTitle className="text-base font-bold text-zinc-100">
-              {kot.orderNumber}
-            </CardTitle>
-            {kot.tableNumber && (
-              <p className="text-sm text-zinc-400">{kot.tableNumber}</p>
-            )}
-          </div>
-          <div className="flex flex-col items-end gap-1.5">
-            {!isOnline && (
-              <Badge variant="outline" className={cn("text-[10px]", config.className)}>
-                <TypeIcon className="mr-1 h-3 w-3" />
-                {config.label}
-              </Badge>
-            )}
-            <div
-              className={cn(
-                "flex items-center gap-1 text-xs font-mono font-semibold",
-                getTimerColor(kot.createdAt)
-              )}
-            >
-              <Clock className="h-3 w-3" />
-              {elapsed}
-            </div>
-          </div>
-        </div>
-
-        {/* Delivery partner info + pickup ETA */}
-        {isOnline && (
-          <div className="mt-2 space-y-1 rounded-md bg-zinc-900/60 p-2">
-            {kot.customerName && (
-              <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-                <User className="h-3 w-3 shrink-0" />
-                <span className="truncate">{kot.customerName}</span>
-              </div>
-            )}
-            {kot.deliveryPartnerName && (
-              <div className="flex items-center gap-1.5 text-xs text-zinc-300">
-                <Truck className="h-3 w-3 shrink-0" />
-                <span className="truncate">
-                  {kot.deliveryPartnerName}
-                </span>
-                {kot.deliveryPartnerPhone && (
-                  <a href={`tel:${kot.deliveryPartnerPhone}`} className="ml-auto text-blue-400 hover:text-blue-300">
-                    <Phone className="h-3 w-3" />
-                  </a>
-                )}
-              </div>
-            )}
-            {kot.pickupEta && etaCountdown && (
-              <div
+      >
+        <CardHeader className="p-4 pb-2">
+          {/* Done / Cancelled badge */}
+          {isDone && (
+            <div className="flex items-center gap-2 -mt-1 mb-2">
+              <Badge
+                variant="outline"
                 className={cn(
-                  "flex items-center gap-1.5 text-xs font-bold",
-                  getEtaColor(kot.pickupEta)
+                  "text-[10px] font-bold",
+                  kot.status === "served"
+                    ? "border-green-600/50 text-green-400 bg-green-500/10"
+                    : "border-red-600/50 text-red-400 bg-red-500/10"
                 )}
               >
-                <Timer className="h-3 w-3 shrink-0" />
-                Pickup in: {etaCountdown}
+                {kot.status === "served" ? (
+                  <><CheckCircle2 className="mr-1 h-3 w-3" /> Served</>
+                ) : (
+                  <><Ban className="mr-1 h-3 w-3" /> Rejected</>
+                )}
+              </Badge>
+            </div>
+          )}
+
+          {/* Platform banner for online orders */}
+          {isOnline && kot.aggregatorPlatform && (
+            <div className="flex items-center justify-between -mt-1 mb-2">
+              <PlatformBadge platform={kot.aggregatorPlatform} />
+              {kot.aggregatorOrderId && (
+                <span className="text-[10px] font-mono text-zinc-500">
+                  {kot.aggregatorOrderId}
+                </span>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <CardTitle className={cn(
+                "text-base font-bold",
+                isDone ? "text-zinc-400 line-through" : "text-zinc-100"
+              )}>
+                {kot.orderNumber}
+              </CardTitle>
+              {kot.tableNumber && (
+                <p className="text-sm text-zinc-400">{kot.tableNumber}</p>
+              )}
+            </div>
+            <div className="flex flex-col items-end gap-1.5">
+              {!isOnline && (
+                <Badge variant="outline" className={cn("text-[10px]", config.className)}>
+                  <TypeIcon className="mr-1 h-3 w-3" />
+                  {config.label}
+                </Badge>
+              )}
+              <div
+                className={cn(
+                  "flex items-center gap-1 text-xs font-mono font-semibold",
+                  isDone ? "text-zinc-500" : getTimerColor(kot.createdAt)
+                )}
+              >
+                <Clock className="h-3 w-3" />
+                {elapsed}
               </div>
-            )}
+            </div>
           </div>
-        )}
-      </CardHeader>
 
-      <Separator className="bg-zinc-700" />
+          {/* Cancel reason */}
+          {kot.status === "cancelled" && kot.cancelReason && (
+            <div className="mt-2 rounded-md bg-red-950/40 border border-red-800/30 p-2">
+              <div className="flex items-start gap-1.5">
+                <MessageSquare className="h-3 w-3 shrink-0 mt-0.5 text-red-400" />
+                <p className="text-xs text-red-300">{kot.cancelReason}</p>
+              </div>
+            </div>
+          )}
 
-      <CardContent className="p-4 pt-3">
-        <ul className="space-y-2">
-          {kot.items.map((item) => (
-            <li key={item.id}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-zinc-200">
-                    {item.name}
+          {/* Delivery partner info + pickup ETA */}
+          {isOnline && !isDone && (
+            <div className="mt-2 space-y-1 rounded-md bg-zinc-900/60 p-2">
+              {kot.customerName && (
+                <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+                  <User className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{kot.customerName}</span>
+                </div>
+              )}
+              {kot.deliveryPartnerName && (
+                <div className="flex items-center gap-1.5 text-xs text-zinc-300">
+                  <Truck className="h-3 w-3 shrink-0" />
+                  <span className="truncate">
+                    {kot.deliveryPartnerName}
                   </span>
-                  {item.modifiers.length > 0 && (
-                    <p className="text-xs text-amber-400">
-                      {item.modifiers.join(", ")}
-                    </p>
-                  )}
-                  {item.notes && (
-                    <p className="text-xs italic text-zinc-500">
-                      {item.notes}
-                    </p>
+                  {kot.deliveryPartnerPhone && (
+                    <a href={`tel:${kot.deliveryPartnerPhone}`} className="ml-auto text-blue-400 hover:text-blue-300">
+                      <Phone className="h-3 w-3" />
+                    </a>
                   )}
                 </div>
-                <Badge
-                  variant="outline"
-                  className="shrink-0 border-zinc-600 text-xs font-bold text-zinc-300"
+              )}
+              {kot.pickupEta && etaCountdown && (
+                <div
+                  className={cn(
+                    "flex items-center gap-1.5 text-xs font-bold",
+                    getEtaColor(kot.pickupEta)
+                  )}
                 >
-                  x{item.quantity}
-                </Badge>
-              </div>
-            </li>
-          ))}
-        </ul>
+                  <Timer className="h-3 w-3 shrink-0" />
+                  Pickup in: {etaCountdown}
+                </div>
+              )}
+            </div>
+          )}
+        </CardHeader>
 
-        <div className="mt-4 flex gap-2">
-          {backAction && (
+        <Separator className="bg-zinc-700" />
+
+        <CardContent className="p-4 pt-3">
+          <ul className="space-y-2">
+            {kot.items.map((item) => (
+              <li key={item.id}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <span className={cn(
+                      "text-sm font-medium",
+                      isDone ? "text-zinc-500" : "text-zinc-200"
+                    )}>
+                      {item.name}
+                    </span>
+                    {item.modifiers.length > 0 && (
+                      <p className="text-xs text-amber-400">
+                        {item.modifiers.join(", ")}
+                      </p>
+                    )}
+                    {item.notes && (
+                      <p className="text-xs italic text-zinc-500">
+                        {item.notes}
+                      </p>
+                    )}
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 border-zinc-600 text-xs font-bold text-zinc-300"
+                  >
+                    x{item.quantity}
+                  </Badge>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          {/* Action buttons — hidden for done/rejected */}
+          {!isDone && (
+            <div className="mt-4 flex gap-2">
+              {kot.status === "pending" && (
+                <Button
+                  variant="outline"
+                  className="gap-2 border-red-800/50 text-red-400 hover:bg-red-950/40 hover:text-red-300"
+                  onClick={() => {
+                    setRejectReason("");
+                    setRejectDialogOpen(true);
+                  }}
+                >
+                  <Ban className="h-4 w-4" />
+                  Reject
+                </Button>
+              )}
+              {backAction && (
+                <Button
+                  variant="outline"
+                  className="gap-2 border-zinc-600 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
+                  onClick={() => onAction(kot.id, backAction.newStatus, kot.orderId)}
+                >
+                  <backAction.icon className="h-4 w-4" />
+                  {backAction.label}
+                </Button>
+              )}
+              {action && (
+                <Button
+                  className={cn(
+                    "flex-1 gap-2 font-semibold",
+                    kot.status === "pending" &&
+                      "bg-blue-600 text-white hover:bg-blue-700",
+                    kot.status === "in_progress" &&
+                      "bg-green-600 text-white hover:bg-green-700",
+                    kot.status === "ready" &&
+                      "bg-amber-600 text-white hover:bg-amber-700"
+                  )}
+                  onClick={() => onAction(kot.id, action.newStatus, kot.orderId)}
+                >
+                  <action.icon className="h-4 w-4" />
+                  {action.label}
+                </Button>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Reject Reason Dialog */}
+      <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
+        <DialogContent className="bg-zinc-900 border-zinc-700">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-100">
+              Reject Order — {kot.orderNumber}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label htmlFor="reject-reason" className="text-zinc-300">
+              Reason for rejection
+            </Label>
+            <Textarea
+              id="reject-reason"
+              placeholder="e.g., Item out of stock, Kitchen closed, Too busy…"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              className="min-h-[100px] bg-zinc-800 border-zinc-700 text-zinc-100 placeholder:text-zinc-500"
+            />
+          </div>
+          <DialogFooter className="gap-2">
             <Button
               variant="outline"
-              className="gap-2 border-zinc-600 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
-              onClick={() => onAction(kot.id, backAction.newStatus, kot.orderId)}
+              className="border-zinc-700 text-zinc-300"
+              onClick={() => setRejectDialogOpen(false)}
             >
-              <backAction.icon className="h-4 w-4" />
-              {backAction.label}
+              Cancel
             </Button>
-          )}
-          {action && (
             <Button
-              className={cn(
-                "flex-1 gap-2 font-semibold",
-                kot.status === "pending" &&
-                  "bg-blue-600 text-white hover:bg-blue-700",
-                kot.status === "in_progress" &&
-                  "bg-green-600 text-white hover:bg-green-700",
-                kot.status === "ready" &&
-                  "bg-amber-600 text-white hover:bg-amber-700"
-              )}
-              onClick={() => onAction(kot.id, action.newStatus, kot.orderId)}
+              variant="destructive"
+              disabled={!rejectReason.trim()}
+              onClick={() => {
+                onReject(kot.id, rejectReason.trim(), kot.orderId);
+                setRejectDialogOpen(false);
+              }}
             >
-              <action.icon className="h-4 w-4" />
-              {action.label}
+              <Ban className="mr-2 h-4 w-4" />
+              Reject Order
             </Button>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -452,11 +571,13 @@ function KDSColumn({
   title,
   kots,
   onAction,
+  onReject,
   accentColor,
 }: {
   title: string;
   kots: KOT[];
   onAction: (id: string, newStatus: KotStatus, orderId: string) => void;
+  onReject: (id: string, reason: string, orderId: string) => void;
   accentColor: string;
 }) {
   return (
@@ -483,7 +604,7 @@ function KDSColumn({
             </div>
           )}
           {kots.map((kot) => (
-            <KOTCard key={kot.id} kot={kot} onAction={onAction} />
+            <KOTCard key={kot.id} kot={kot} onAction={onAction} onReject={onReject} />
           ))}
         </div>
       </ScrollArea>
@@ -522,6 +643,7 @@ export default function KitchenDisplayPage() {
           created_at,
           accepted_at,
           ready_at,
+          cancel_reason,
           orders (
             id,
             order_number,
@@ -543,7 +665,7 @@ export default function KitchenDisplayPage() {
         `)
         .eq("tenant_id", tenantUser.tenant_id)
         .eq("branch_id", branchId)
-        .in("status", ["pending", "in_progress", "ready"])
+        .in("status", ["pending", "in_progress", "ready", "served", "cancelled"])
         .order("created_at", { ascending: false });
 
       if (!error && data) {
@@ -608,12 +730,9 @@ export default function KitchenDisplayPage() {
         const kot = prev.find((k) => k.id === id);
         const isAggregator = kot?.orderType === "aggregator";
 
-        const updated =
-          newStatus === "served"
-            ? prev.filter((k) => k.id !== id)
-            : prev.map((k) =>
-                k.id === id ? { ...k, status: newStatus } : k
-              );
+        const updated = prev.map((k) =>
+          k.id === id ? { ...k, status: newStatus } : k
+        );
 
         // Push status to platform for aggregator orders
         if (isAggregator) {
@@ -661,6 +780,47 @@ export default function KitchenDisplayPage() {
     [soundEnabled, supabase, syncStatusToPlatform]
   );
 
+  const handleReject = useCallback(
+    (id: string, reason: string, orderId: string) => {
+      setKots((prev) =>
+        prev.map((k) =>
+          k.id === id ? { ...k, status: "cancelled" as KotStatus, cancelReason: reason } : k
+        )
+      );
+
+      supabase
+        .from("kots")
+        .update({
+          status: "cancelled",
+          cancel_reason: reason,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+        .then(() => {});
+
+      // Sync cancelled status to platform
+      syncStatusToPlatform(orderId, "cancelled" as KotStatus);
+
+      // Play reject sound
+      if (soundEnabled && typeof window !== "undefined") {
+        try {
+          const ctx = new AudioContext();
+          const oscillator = ctx.createOscillator();
+          const gain = ctx.createGain();
+          oscillator.connect(gain);
+          gain.connect(ctx.destination);
+          oscillator.frequency.value = 330;
+          gain.gain.value = 0.1;
+          oscillator.start();
+          oscillator.stop(ctx.currentTime + 0.3);
+        } catch {
+          // Audio not available
+        }
+      }
+    },
+    [soundEnabled, supabase, syncStatusToPlatform]
+  );
+
   // Filter KOTs
   const filteredKots = kots.filter((k) => {
     if (filter === "all") return true;
@@ -672,6 +832,7 @@ export default function KitchenDisplayPage() {
   const pendingKots = sortByPriority(filteredKots.filter((k) => k.status === "pending"));
   const inProgressKots = sortByPriority(filteredKots.filter((k) => k.status === "in_progress"));
   const readyKots = sortByPriority(filteredKots.filter((k) => k.status === "ready"));
+  const doneKots = sortByPriority(filteredKots.filter((k) => k.status === "served" || k.status === "cancelled"));
 
   // Counts for filter badges
   const onlineCount = kots.filter((k) => k.orderType === "aggregator").length;
@@ -746,19 +907,29 @@ export default function KitchenDisplayPage() {
           title="New"
           kots={pendingKots}
           onAction={handleAction}
+          onReject={handleReject}
           accentColor="bg-blue-500"
         />
         <KDSColumn
           title="In Progress"
           kots={inProgressKots}
           onAction={handleAction}
+          onReject={handleReject}
           accentColor="bg-amber-500"
         />
         <KDSColumn
           title="Ready"
           kots={readyKots}
           onAction={handleAction}
+          onReject={handleReject}
           accentColor="bg-green-500"
+        />
+        <KDSColumn
+          title="Done / Rejected"
+          kots={doneKots}
+          onAction={handleAction}
+          onReject={handleReject}
+          accentColor="bg-zinc-500"
         />
       </div>
       )}
