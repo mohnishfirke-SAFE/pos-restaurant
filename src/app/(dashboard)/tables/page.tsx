@@ -28,10 +28,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Plus, Users, Clock, ShoppingCart, Trash2, Loader2, Wrench } from "lucide-react";
+import { Plus, Users, Clock, ShoppingCart, Trash2, Loader2, Wrench, Banknote } from "lucide-react";
 import { useTenantUser } from "@/lib/auth/hooks";
 import { useBranchStore } from "@/stores/branch-store";
 import { useTables, useCreateTable, useUpdateTableStatus, useDeleteTable } from "@/hooks/use-tables";
+import { useSettleBill } from "@/hooks/use-billing";
+import { PaymentDialog } from "@/components/shared/payment-dialog";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -148,6 +150,15 @@ export default function TablesPage() {
   const [selectedTable, setSelectedTable] = useState<TableData | null>(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [settleDialogOpen, setSettleDialogOpen] = useState(false);
+
+  const settleBill = useSettleBill();
+
+  // Compute order meta for selected table (used in detail dialog + settle dialog)
+  const selectedOrderMeta = useMemo(() => {
+    if (!selectedTable) return { total: null, createdAt: null };
+    return getOrderMeta(selectedTable.orders, selectedTable.current_order_id);
+  }, [selectedTable]);
 
   // Use ALL_FLOORS as the base, include any custom floors from existing data
   const floors = useMemo(() => {
@@ -487,7 +498,7 @@ export default function TablesPage() {
           {selectedTable && (() => {
             const status = (selectedTable.status || "available") as TableStatus;
             const style = STATUS_STYLES[status] || STATUS_STYLES.available;
-            const { total: currentOrderTotal, createdAt: occupiedSince } = getOrderMeta(selectedTable.orders, selectedTable.current_order_id);
+            const { total: currentOrderTotal, createdAt: occupiedSince } = selectedOrderMeta;
             return (
               <>
                 <DialogHeader>
@@ -525,16 +536,26 @@ export default function TablesPage() {
                           {getElapsedTime(occupiedSince)}
                         </p>
                       )}
-                      <Button
-                        className="mt-2 w-full"
-                        variant="outline"
-                        onClick={() => {
-                          router.push("/orders");
-                          setSelectedTable(null);
-                        }}
-                      >
-                        View Order
-                      </Button>
+                      <div className="mt-2 flex gap-2">
+                        <Button
+                          className="flex-1"
+                          variant="outline"
+                          onClick={() => {
+                            router.push("/orders");
+                            setSelectedTable(null);
+                          }}
+                        >
+                          View Order
+                        </Button>
+                        <Button
+                          className="flex-1 gap-1.5"
+                          disabled={!selectedTable.current_order_id || currentOrderTotal === null}
+                          onClick={() => setSettleDialogOpen(true)}
+                        >
+                          <Banknote className="h-4 w-4" />
+                          Settle Bill
+                        </Button>
+                      </div>
                     </div>
                   )}
 
@@ -683,6 +704,40 @@ export default function TablesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Settle Bill Dialog */}
+      {selectedTable?.status === "occupied" &&
+        selectedTable.current_order_id &&
+        selectedOrderMeta.total !== null && (
+          <PaymentDialog
+            open={settleDialogOpen}
+            onOpenChange={setSettleDialogOpen}
+            total={selectedOrderMeta.total}
+            loading={settleBill.isPending}
+            onComplete={(method) => {
+              if (!tenantUser || !branchId) return;
+              settleBill.mutate(
+                {
+                  order_id: selectedTable.current_order_id!,
+                  tenant_id: tenantUser.tenant_id,
+                  branch_id: branchId,
+                  method,
+                  amount: selectedOrderMeta.total!,
+                  user_id: tenantUser.user_id,
+                },
+                {
+                  onSuccess: () => {
+                    setSettleDialogOpen(false);
+                    setSelectedTable(null);
+                  },
+                  onError: (err) => {
+                    alert(err.message || "Failed to settle bill");
+                  },
+                }
+              );
+            }}
+          />
+        )}
     </div>
   );
 }

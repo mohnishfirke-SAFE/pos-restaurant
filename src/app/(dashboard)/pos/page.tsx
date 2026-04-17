@@ -9,14 +9,11 @@ import {
   Trash2,
   ShoppingCart,
   CreditCard,
-  Banknote,
-  Smartphone,
   UtensilsCrossed,
   ShoppingBag,
   Truck,
   Pause,
   Send,
-  Receipt,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -32,137 +29,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { usePOSStore, type CartItem } from "@/stores/pos-store";
 import { useMenuItems, useMenuCategories } from "@/hooks/use-menu";
+import { useSettleBill } from "@/hooks/use-billing";
+import { PaymentDialog } from "@/components/shared/payment-dialog";
 import { formatINR } from "@/lib/utils/currency";
 import { cn } from "@/lib/utils";
 import { useTenantUser } from "@/lib/auth/hooks";
 import { useBranchStore } from "@/stores/branch-store";
 import { createClient } from "@/lib/supabase/client";
-
-// ---------------------------------------------------------------------------
-// Payment Dialog
-// ---------------------------------------------------------------------------
-function PaymentDialog({
-  open,
-  onOpenChange,
-  total,
-  onComplete,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  total: number;
-  onComplete: () => void;
-}) {
-  const [method, setMethod] = useState<"cash" | "card" | "upi">("cash");
-  const [amountTendered, setAmountTendered] = useState("");
-
-  const changeDue = useMemo(() => {
-    const tendered = parseFloat(amountTendered) || 0;
-    return Math.max(0, tendered - total);
-  }, [amountTendered, total]);
-
-  const canComplete =
-    method !== "cash" || (parseFloat(amountTendered) || 0) >= total;
-
-  function handleComplete() {
-    onComplete();
-    onOpenChange(false);
-    setMethod("cash");
-    setAmountTendered("");
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Payment</DialogTitle>
-          <DialogDescription>
-            Total due: <span className="font-bold">{formatINR(total)}</span>
-          </DialogDescription>
-        </DialogHeader>
-
-        {/* Payment method buttons */}
-        <div className="grid grid-cols-3 gap-3">
-          {(
-            [
-              { key: "cash", label: "Cash", icon: Banknote },
-              { key: "card", label: "Card", icon: CreditCard },
-              { key: "upi", label: "UPI", icon: Smartphone },
-            ] as const
-          ).map(({ key, label, icon: Icon }) => (
-            <Button
-              key={key}
-              variant={method === key ? "default" : "outline"}
-              className="flex h-20 flex-col gap-2"
-              onClick={() => setMethod(key)}
-            >
-              <Icon className="!h-6 !w-6" />
-              {label}
-            </Button>
-          ))}
-        </div>
-
-        {/* Cash-specific fields */}
-        {method === "cash" && (
-          <div className="space-y-3 rounded-lg border p-4">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Amount Tendered</label>
-              <Input
-                type="number"
-                placeholder="0.00"
-                value={amountTendered}
-                onChange={(e) => setAmountTendered(e.target.value)}
-                min={0}
-                step={0.01}
-                autoFocus
-              />
-            </div>
-            <Separator />
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Change Due</span>
-              <span className="text-lg font-bold text-green-600">
-                {formatINR(changeDue)}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {method === "card" && (
-          <div className="rounded-lg border p-4 text-center text-sm text-muted-foreground">
-            Waiting for card terminal...
-          </div>
-        )}
-
-        {method === "upi" && (
-          <div className="rounded-lg border p-4 text-center text-sm text-muted-foreground">
-            Scan QR or enter UPI reference after payment
-          </div>
-        )}
-
-        <DialogFooter>
-          <Button
-            className="w-full"
-            size="lg"
-            disabled={!canComplete}
-            onClick={handleComplete}
-          >
-            <Receipt className="mr-2 h-4 w-4" />
-            Complete Payment &mdash; {formatINR(total)}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // POS Terminal Page
@@ -358,8 +233,52 @@ function POSTerminalInner() {
     }
   }
 
-  function handlePaymentComplete() {
-    clearCart();
+  const settleBill = useSettleBill();
+
+  async function handlePaymentComplete(method: "cash" | "card" | "upi") {
+    if (!tenantUser) {
+      alert("Session expired. Please log in again.");
+      return;
+    }
+    const branchId = tenantUser.branch_id || activeBranchId;
+    if (!branchId) {
+      alert("No branch assigned. Contact your manager.");
+      return;
+    }
+    if (cartItems.length === 0) return;
+
+    try {
+      await settleBill.mutateAsync({
+        tenant_id: tenantUser.tenant_id,
+        branch_id: branchId,
+        method,
+        amount: total,
+        user_id: tenantUser.user_id,
+        order_data: {
+          tenant_id: tenantUser.tenant_id,
+          branch_id: branchId,
+          order_type: orderType,
+          table_id: tableId || null,
+          waiter_id: tenantUser.user_id ?? null,
+          subtotal,
+          discount_amount: discountAmount,
+          tax_amount: tax.total,
+          cgst_amount: tax.cgst,
+          sgst_amount: tax.sgst,
+          total,
+          items: cartItems.map((item) => ({
+            menu_item_id: item.menuItemId,
+            quantity: item.quantity,
+            unit_price: item.price,
+            modifiers: item.modifiers,
+            notes: item.notes,
+          })),
+        },
+      });
+      clearCart();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Payment failed");
+    }
   }
 
   return (
@@ -639,6 +558,7 @@ function POSTerminalInner() {
         onOpenChange={setPaymentOpen}
         total={total}
         onComplete={handlePaymentComplete}
+        loading={settleBill.isPending}
       />
     </div>
   );
