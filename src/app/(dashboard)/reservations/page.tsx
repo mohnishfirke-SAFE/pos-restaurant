@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -169,33 +169,47 @@ export default function ReservationsPage() {
   );
   const sortedDates = Object.keys(groupedByDate).sort();
 
-  function handleCreateReservation(formData: FormData) {
-    if (!tenantId || !branchId) return;
+  const handleCreateReservation = useCallback(
+    (formData: FormData) => {
+      if (!tenantId || !branchId) return;
 
-    createReservation.mutate(
-      {
-        tenant_id: tenantId,
-        branch_id: branchId,
-        customer_name: (formData.get("guestName") as string) || "",
-        customer_phone: (formData.get("phone") as string) || "",
-        customer_email: (formData.get("email") as string) || null,
-        party_size: parseInt(formData.get("partySize") as string, 10) || 2,
-        reservation_date: (formData.get("date") as string) || todayStr,
-        reservation_time: (formData.get("time") as string) || "19:00",
-        duration_minutes:
-          parseInt(formData.get("duration") as string, 10) || 90,
-        table_id: (formData.get("tableId") as string) || null,
-        customer_id: null,
-        status: "pending",
-        notes: (formData.get("notes") as string) || null,
-      },
-      {
-        onSuccess: () => {
-          setDialogOpen(false);
-        },
+      const date = (formData.get("date") as string) || todayStr;
+      const time = (formData.get("time") as string) || "19:00";
+
+      // Prevent past date/time reservations
+      const now = new Date();
+      const reservationDateTime = new Date(`${date}T${time}`);
+      if (reservationDateTime < now) {
+        alert("Reservation date and time must be in the future.");
+        return;
       }
-    );
-  }
+
+      createReservation.mutate(
+        {
+          tenant_id: tenantId,
+          branch_id: branchId,
+          customer_name: (formData.get("guestName") as string) || "",
+          customer_phone: (formData.get("phone") as string) || "",
+          customer_email: (formData.get("email") as string) || null,
+          party_size: parseInt(formData.get("partySize") as string, 10) || 2,
+          reservation_date: date,
+          reservation_time: time,
+          duration_minutes:
+            parseInt(formData.get("duration") as string, 10) || 90,
+          table_id: (formData.get("tableId") as string) || null,
+          customer_id: null,
+          status: "pending",
+          notes: (formData.get("notes") as string) || null,
+        },
+        {
+          onSuccess: () => {
+            setDialogOpen(false);
+          },
+        }
+      );
+    },
+    [tenantId, branchId, todayStr, createReservation]
+  );
 
   function handleStatusChange(id: string, newStatus: string) {
     updateReservation.mutate({ id, status: newStatus });
@@ -320,6 +334,7 @@ export default function ReservationsPage() {
                       name="date"
                       type="date"
                       defaultValue={todayStr}
+                      min={todayStr}
                       required
                     />
                   </div>
